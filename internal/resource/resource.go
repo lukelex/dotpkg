@@ -116,7 +116,10 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		if err := stage.apply(stage.plan); err != nil {
 			return err
 		}
-		items := append([]string{}, stage.plan.Declared...)
+		items := append([]string{}, s.Items(stage.path...)...)
+		items = subtract(items, stage.plan.Extra)
+		items = append(items, stage.plan.Adopted...)
+		items = append(items, stage.plan.Missing...)
 		s.SetItems(items, stage.path...)
 	}
 	return s.Write()

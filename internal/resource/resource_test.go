@@ -153,3 +153,19 @@ func TestSyncAppliesResourcesAndTracksOwnership(t *testing.T) {
 		t.Fatalf("tracked services = %q", got)
 	}
 }
+
+func TestSyncDoesNotTrackUnavailableResources(t *testing.T) {
+	m, s, options, system := resourceFixture(t)
+	delete(system.groupExists, "video")
+	delete(system.services, "user:desktop.service")
+	options.Yes = true
+	if err := Sync(context.Background(), m, s, options, system); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(s.Items("managed", "groups"), ","); got != "docker" {
+		t.Fatalf("tracked groups = %q", got)
+	}
+	if got := strings.Join(s.Items("managed", "services"), ","); got != "docker" {
+		t.Fatalf("tracked services = %q", got)
+	}
+}
