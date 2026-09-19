@@ -55,3 +55,23 @@ func TestStateGenericManagedItems(t *testing.T) {
 		t.Fatalf("managed configs = %q", got)
 	}
 }
+
+func TestStateValidationRejectsUnsupportedVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	if err := os.WriteFile(path, []byte("version: 2\nmanaged:\n  packages: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "unsupported version") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestStateValidationRejectsMalformedManagedList(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	if err := os.WriteFile(path, []byte("version: 1\nmanaged:\n  packages: nope\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "managed.packages") {
+		t.Fatalf("error = %v", err)
+	}
+}

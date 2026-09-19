@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -78,23 +79,27 @@ Common options:
   --resources        Also reconcile groups, config links, and services
   --root PATH        Dotfiles root for resource paths
   --replace          Replace conflicting config targets
+  --restart-services Restart services backed by config links
+  --output FORMAT    Plan output: text or json (default: text)
   --help             Show this help`)
 }
 
 type commonFlags struct {
-	manifest  string
-	host      string
-	state     string
-	profile   string
-	dryRun    bool
-	yes       bool
-	resources bool
-	root      string
-	replace   bool
-	help      bool
-	desktop   bool
-	server    bool
-	check     bool
+	manifest        string
+	host            string
+	state           string
+	profile         string
+	dryRun          bool
+	yes             bool
+	resources       bool
+	root            string
+	replace         bool
+	restartServices bool
+	output          string
+	help            bool
+	desktop         bool
+	server          bool
+	check           bool
 }
 
 func (f *commonFlags) register(set *flag.FlagSet) {
@@ -108,6 +113,8 @@ func (f *commonFlags) register(set *flag.FlagSet) {
 	set.BoolVar(&f.resources, "resources", false, "reconcile groups, configs, and services")
 	set.StringVar(&f.root, "root", "", "dotfiles root for resources")
 	set.BoolVar(&f.replace, "replace", false, "replace conflicting config targets")
+	set.BoolVar(&f.restartServices, "restart-services", false, "restart services backed by config links")
+	set.StringVar(&f.output, "output", "text", "plan output format")
 	set.BoolVar(&f.desktop, "desktop", false, "use the desktop profile")
 	set.BoolVar(&f.server, "server", false, "use the server profile")
 	set.BoolVar(&f.help, "help", false, "show help")
@@ -123,15 +130,17 @@ func (f commonFlags) options() reconcile.Options {
 		profile = "server"
 	}
 	return reconcile.Options{
-		ManifestPath: f.manifest,
-		HostPath:     f.host,
-		StatePath:    f.state,
-		Profile:      profile,
-		DryRun:       f.dryRun || f.check,
-		Yes:          f.yes,
-		Resources:    f.resources,
-		RootPath:     f.root,
-		Replace:      f.replace,
+		ManifestPath:    f.manifest,
+		HostPath:        f.host,
+		StatePath:       f.state,
+		Profile:         profile,
+		DryRun:          f.dryRun || f.check,
+		Yes:             f.yes,
+		Resources:       f.resources,
+		RootPath:        f.root,
+		Replace:         f.replace,
+		RestartServices: f.restartServices,
+		OutputFormat:    f.output,
 	}
 }
 
@@ -261,11 +270,126 @@ func addLocked(ctx context.Context, packageName, requestedScope string, options 
 	if options.HostPath != "" {
 		target = options.HostPath
 	}
-	if err := m.AddPackage(target, path, packageName); err != nil {
+	stagedTarget, err := stageFile(target)
+	if err != nil {
 		return err
 	}
+	defer os.Remove(stagedTarget)
+	if err := m.AddPackage(stagedTarget, path, packageName); err != nil {
+		return err
+	}
+	stateSnapshot, err := snapshotFile(options.StatePath)
+	if err != nil {
+		return err
+	}
+	syncOptions := options
+	if options.HostPath != "" {
+		syncOptions.HostPath = stagedTarget
+	} else {
+		syncOptions.ManifestPath = stagedTarget
+	}
+	if err := reconcile.SyncLocked(ctx, syncOptions, system); err != nil {
+		if restoreErr := restoreFile(options.StatePath, stateSnapshot); restoreErr != nil {
+			return fmt.Errorf("%w (restore state: %v)", err, restoreErr)
+		}
+		return err
+	}
+	if err := os.Rename(stagedTarget, target); err != nil {
+		if restoreErr := restoreFile(options.StatePath, stateSnapshot); restoreErr != nil {
+			return fmt.Errorf("replace manifest: %w (restore state: %v)", err, restoreErr)
+		}
+		return fmt.Errorf("replace manifest: %w", err)
+	}
 	_ = s
-	return reconcile.SyncLocked(ctx, options, system)
+	return nil
+}
+
+type fileSnapshot struct {
+	contents []byte
+	mode     os.FileMode
+	exists   bool
+}
+
+func snapshotFile(path string) (fileSnapshot, error) {
+	contents, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return fileSnapshot{}, nil
+	}
+	if err != nil {
+		return fileSnapshot{}, fmt.Errorf("read %s: %w", path, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fileSnapshot{}, fmt.Errorf("stat %s: %w", path, err)
+	}
+	return fileSnapshot{contents: contents, mode: info.Mode().Perm(), exists: true}, nil
+}
+
+func stageFile(path string) (string, error) {
+	snapshot, err := snapshotFile(path)
+	if err != nil {
+		return "", err
+	}
+	if !snapshot.exists {
+		return "", fmt.Errorf("file does not exist: %s", path)
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".dotpkg-*")
+	if err != nil {
+		return "", fmt.Errorf("stage %s: %w", path, err)
+	}
+	temporaryName := temporary.Name()
+	cleanup := func() {
+		temporary.Close()
+		os.Remove(temporaryName)
+	}
+	if err := temporary.Chmod(snapshot.mode); err != nil {
+		cleanup()
+		return "", fmt.Errorf("set staged permissions: %w", err)
+	}
+	if _, err := temporary.Write(snapshot.contents); err != nil {
+		cleanup()
+		return "", fmt.Errorf("stage %s: %w", path, err)
+	}
+	if err := temporary.Close(); err != nil {
+		os.Remove(temporaryName)
+		return "", fmt.Errorf("close staged %s: %w", path, err)
+	}
+	return temporaryName, nil
+}
+
+func restoreFile(path string, snapshot fileSnapshot) error {
+	if !snapshot.exists {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	temporary, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".dotpkg-restore-*")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	cleanup := func() {
+		temporary.Close()
+		os.Remove(temporaryName)
+	}
+	if err := temporary.Chmod(snapshot.mode); err != nil {
+		cleanup()
+		return err
+	}
+	if _, err := temporary.Write(snapshot.contents); err != nil {
+		cleanup()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		os.Remove(temporaryName)
+		return err
+	}
+	if err := os.Rename(temporaryName, path); err != nil {
+		os.Remove(temporaryName)
+		return err
+	}
+	return nil
 }
 
 func chooseScope(options reconcile.Options, packageName string) (string, error) {

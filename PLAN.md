@@ -113,7 +113,7 @@ Without `--resources`, the package executable only modifies
 dotfiles state file. With `--resources`, it additionally owns the managed
 groups, configs, and services fields.
 
-## Remaining work before a swap
+## Compatibility and hardening checklist
 
 ### 1. Complete behavioral parity
 
@@ -178,11 +178,10 @@ The dotfiles entrypoints now invoke the pinned executable directly:
 
 ### 6. Release process
 
-The workflow currently builds release assets on `v*` tags. Before the first
-stable release:
+The workflow builds release assets on `v*` tags:
 
 - [x] add checksums and release verification documentation
-- [ ] consider GitHub artifact attestations or signed releases
+- [x] publish GitHub build attestations for release assets
 - [x] publish an explicitly experimental prerelease first
 - [x] document that “universal Linux” means libc-independent per-architecture
   binaries; one ELF cannot run on both x86-64 and ARM64

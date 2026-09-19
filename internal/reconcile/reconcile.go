@@ -3,6 +3,7 @@ package reconcile
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -18,19 +19,21 @@ import (
 )
 
 type Options struct {
-	ManifestPath   string
-	HostPath       string
-	HostLabel      string
-	StatePath      string
-	Profile        string
-	DryRun         bool
-	Yes            bool
-	Resources      bool
-	RootPath       string
-	Replace        bool
-	ResourceSystem resource.System
-	Input          io.Reader
-	Output         io.Writer
+	ManifestPath    string
+	HostPath        string
+	HostLabel       string
+	StatePath       string
+	Profile         string
+	DryRun          bool
+	Yes             bool
+	Resources       bool
+	RootPath        string
+	Replace         bool
+	RestartServices bool
+	ResourceSystem  resource.System
+	Input           io.Reader
+	Output          io.Writer
+	OutputFormat    string
 }
 
 type Plan struct {
@@ -83,6 +86,12 @@ func (o Options) normalize() (Options, error) {
 	}
 	if o.Output == nil {
 		o.Output = os.Stdout
+	}
+	if o.OutputFormat == "" {
+		o.OutputFormat = "text"
+	}
+	if o.OutputFormat != "text" && o.OutputFormat != "json" {
+		return o, fmt.Errorf("unknown output format: %s", o.OutputFormat)
 	}
 	if o.HostPath != "" {
 		requestedHost := o.HostPath
@@ -324,9 +333,11 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	if err != nil {
 		return err
 	}
-	printPlan(options.Output, plan)
+	printPlan(options.Output, plan, options.OutputFormat)
 	if plan.Changes() == 0 {
-		fmt.Fprintln(options.Output, "packages: already synchronized")
+		if options.OutputFormat == "text" {
+			fmt.Fprintln(options.Output, "packages: already synchronized")
+		}
 		if !options.Resources {
 			return nil
 		}
@@ -385,13 +396,15 @@ func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, op
 		}
 	}
 	return resource.Sync(ctx, m, s, resource.Options{
-		Profile:  options.Profile,
-		RootPath: options.RootPath,
-		DryRun:   options.DryRun,
-		Yes:      options.Yes,
-		Replace:  options.Replace,
-		Input:    options.Input,
-		Output:   options.Output,
+		Profile:         options.Profile,
+		RootPath:        options.RootPath,
+		DryRun:          options.DryRun,
+		Yes:             options.Yes,
+		Replace:         options.Replace,
+		RestartServices: options.RestartServices,
+		Input:           options.Input,
+		Output:          options.Output,
+		OutputFormat:    options.OutputFormat,
 	}, resourceSystem)
 }
 
@@ -405,7 +418,17 @@ func setCurrentState(s *state.State, m *manifest.Manifest, options Options) {
 	s.Set(m.Digest(), "current", "manifest_sha256")
 }
 
-func printPlan(output io.Writer, plan Plan) {
+func printPlan(output io.Writer, plan Plan, format string) {
+	if format == "json" {
+		_ = json.NewEncoder(output).Encode(map[string]any{
+			"stage":    "packages",
+			"declared": plan.Declared,
+			"adopted":  plan.Adopted,
+			"missing":  plan.Missing,
+			"extra":    plan.Extra,
+		})
+		return
+	}
 	fmt.Fprintln(output, "PACKAGES")
 	for _, packageName := range plan.Adopted {
 		fmt.Fprintf(output, "  ~ adopt: %s\n", packageName)

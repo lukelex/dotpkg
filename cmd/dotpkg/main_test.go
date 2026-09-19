@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -89,8 +91,9 @@ func TestScopePathRejectsInvalidOptionName(t *testing.T) {
 }
 
 type addFakeBackend struct {
-	installed map[string]bool
-	install   []string
+	installed  map[string]bool
+	install    []string
+	installErr error
 }
 
 func (f *addFakeBackend) IsInstalled(_ context.Context, name string) (bool, error) {
@@ -110,6 +113,9 @@ func (f *addFakeBackend) AURPackages(_ context.Context, names []string) (map[str
 }
 
 func (f *addFakeBackend) Install(_ context.Context, repository, aur []string, _ string) error {
+	if f.installErr != nil {
+		return f.installErr
+	}
 	f.install = append(f.install, repository...)
 	f.install = append(f.install, aur...)
 	return nil
@@ -219,5 +225,38 @@ func TestAddWritesHostOverlayAndRecordsHostName(t *testing.T) {
 	}
 	if hostName, ok := loaded.Get("current", "host"); !ok || hostName != "laptop" {
 		t.Fatalf("recorded host = %#v", hostName)
+	}
+}
+
+func TestAddRollsBackManifestAndStateWhenSyncFails(t *testing.T) {
+	directory := t.TempDir()
+	manifestPath, statePath := writeAddFixture(t, directory)
+	originalManifest, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalState, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &addFakeBackend{
+		installed:  map[string]bool{"git": true, "base": true},
+		installErr: errors.New("installation failed"),
+	}
+	err = addLocked(context.Background(), "new-package", "desktop", reconcile.Options{
+		ManifestPath: manifestPath,
+		StatePath:    statePath,
+		Profile:      "desktop",
+		Yes:          true,
+		Output:       io.Discard,
+	}, fake)
+	if err == nil || !strings.Contains(err.Error(), "installation failed") {
+		t.Fatalf("error = %v", err)
+	}
+	if got, _ := os.ReadFile(manifestPath); !bytes.Equal(got, originalManifest) {
+		t.Fatalf("manifest changed after failed add")
+	}
+	if got, _ := os.ReadFile(statePath); !bytes.Equal(got, originalState) {
+		t.Fatalf("state changed after failed add")
 	}
 }

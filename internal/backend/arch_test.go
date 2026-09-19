@@ -151,6 +151,35 @@ func TestArchAURPackagesBatchesRequests(t *testing.T) {
 	}
 }
 
+func TestArchAURPackagesRetriesTransientFailures(t *testing.T) {
+	attempts := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		attempts++
+		if attempts < 2 {
+			return &http.Response{
+				StatusCode: http.StatusServiceUnavailable,
+				Status:     "503 Service Unavailable",
+				Body:       io.NopCloser(strings.NewReader("busy")),
+				Header:     make(http.Header),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Status:     "200 OK",
+			Body:       io.NopCloser(strings.NewReader(`{"results":[{"Name":"git"}]}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	arch := &Arch{HTTPClient: client}
+	got, err := arch.AURPackages(context.Background(), []string{"git"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := got["git"]; !ok || attempts != 2 {
+		t.Fatalf("packages = %#v, attempts = %d", got, attempts)
+	}
+}
+
 func TestArchAURPackagesReportsHTTPError(t *testing.T) {
 	arch := &Arch{HTTPClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -340,6 +369,9 @@ func TestArchResourceCommands(t *testing.T) {
 	if err := arch.ReloadServices(context.Background(), false); err != nil {
 		t.Fatal(err)
 	}
+	if err := arch.RestartService(context.Background(), true, "example.service"); err != nil {
+		t.Fatal(err)
+	}
 	if err := arch.DisableService(context.Background(), false, "docker.service"); err != nil {
 		t.Fatal(err)
 	}
@@ -355,6 +387,7 @@ func TestArchResourceCommands(t *testing.T) {
 		{"gpasswd", "-d", "lukas", "docker"},
 		{"--user", "enable", "--now", "example.service"},
 		{"systemctl", "daemon-reload"},
+		{"--user", "try-restart", "example.service"},
 		{"systemctl", "disable", "--now", "docker.service"},
 	}
 	if len(runs) != len(want) {

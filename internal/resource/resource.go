@@ -3,6 +3,7 @@ package resource
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,19 +25,22 @@ type System interface {
 	ServiceExists(context.Context, bool, string) (bool, error)
 	ServiceEnabled(context.Context, bool, string) (bool, error)
 	ReloadServices(context.Context, bool) error
+	RestartService(context.Context, bool, string) error
 	EnableService(context.Context, bool, string) error
 	DisableService(context.Context, bool, string) error
 }
 
 type Options struct {
-	Profile  string
-	RootPath string
-	User     string
-	DryRun   bool
-	Yes      bool
-	Replace  bool
-	Input    io.Reader
-	Output   io.Writer
+	Profile         string
+	RootPath        string
+	User            string
+	DryRun          bool
+	Yes             bool
+	Replace         bool
+	RestartServices bool
+	Input           io.Reader
+	Output          io.Writer
+	OutputFormat    string
 }
 
 type StagePlan struct {
@@ -85,7 +89,7 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 	if err != nil {
 		return err
 	}
-	printPlan(options.Output, plan)
+	printPlan(options.Output, plan, options.OutputFormat)
 	if plan.Changes() == 0 || options.DryRun {
 		return nil
 	}
@@ -109,10 +113,7 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		stage := &stages[index]
 		if stage.plan.Changes() == 0 {
 			if stage.name == "configs" && !options.DryRun {
-				if err := reloadForDeclaredConfigs(ctx, plan.Configs.Declared, options, system); err != nil {
-					return err
-				}
-				if err := refreshServicePlan(ctx, stages, m, s, options, system); err != nil {
+				if err := refreshServicesAfterConfigs(ctx, stages, m, s, plan.Configs.Declared, options, system); err != nil {
 					return err
 				}
 			}
@@ -141,16 +142,40 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		items = append(items, stage.plan.Missing...)
 		if stage.name == "configs" {
 			items = matchingConfigs(stage.plan.Declared, options)
-			if err := reloadForDeclaredConfigs(ctx, plan.Configs.Declared, options, system); err != nil {
-				return err
-			}
-			if err := refreshServicePlan(ctx, stages, m, s, options, system); err != nil {
+			if err := refreshServicesAfterConfigs(ctx, stages, m, s, plan.Configs.Declared, options, system); err != nil {
 				return err
 			}
 		}
 		s.SetItems(items, stage.path...)
 	}
 	return s.Write()
+}
+
+func refreshServicesAfterConfigs(ctx context.Context, stages []struct {
+	name  string
+	plan  StagePlan
+	apply func(StagePlan) error
+	path  []string
+}, m *manifest.Manifest, s *state.State, declared []string, options Options, system System) error {
+	if err := reloadForDeclaredConfigs(ctx, declared, options, system); err != nil {
+		return err
+	}
+	if err := refreshServicePlan(ctx, stages, m, s, options, system); err != nil {
+		return err
+	}
+	if !options.RestartServices {
+		return nil
+	}
+	for _, service := range stages[2].plan.Declared {
+		if !configMatchesService(declared, service, options) {
+			continue
+		}
+		userService := strings.HasPrefix(service, "user:")
+		if err := system.RestartService(ctx, userService, strings.TrimPrefix(service, "user:")); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func refreshServicePlan(ctx context.Context, stages []struct {
@@ -321,6 +346,9 @@ func planConfigs(m *manifest.Manifest, s *state.State, options Options) (StagePl
 		if err != nil {
 			return StagePlan{}, err
 		}
+		if _, err := os.Lstat(source); err != nil {
+			return StagePlan{}, fmt.Errorf("config source %s: %w", source, err)
+		}
 		matches, err := configMatches(target, source)
 		if err != nil {
 			return StagePlan{}, err
@@ -398,6 +426,26 @@ func configProvidesService(configs []string, service string, options Options, al
 	return false
 }
 
+func configMatchesService(configs []string, service string, options Options) bool {
+	userService := strings.HasPrefix(service, "user:")
+	name := strings.TrimPrefix(service, "user:")
+	suffix := "/systemd/system/" + name
+	if userService {
+		suffix = "/systemd/user/" + name
+	}
+	for _, mapping := range configs {
+		source, target, err := configPaths(mapping, options)
+		if err != nil || !strings.HasSuffix(filepath.ToSlash(target), suffix) {
+			continue
+		}
+		matches, err := configMatches(target, source)
+		if err == nil && matches {
+			return true
+		}
+	}
+	return false
+}
+
 func applyGroups(ctx context.Context, plan StagePlan, options Options, system System) error {
 	for _, group := range plan.Missing {
 		if err := system.AddToGroup(ctx, options.User, group); err != nil {
@@ -465,6 +513,9 @@ func configPaths(mapping string, options Options) (string, string, error) {
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return "", "", fmt.Errorf("invalid config mapping: %s", mapping)
 	}
+	if filepath.IsAbs(parts[0]) {
+		return "", "", fmt.Errorf("config source must be relative to root: %s", parts[0])
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", "", fmt.Errorf("find home directory: %w", err)
@@ -475,7 +526,19 @@ func configPaths(mapping string, options Options) (string, string, error) {
 	}
 	target := strings.ReplaceAll(parts[1], "$HOME", home)
 	target = strings.ReplaceAll(target, "$XDG_CONFIG_HOME", configHome)
-	return filepath.Join(options.RootPath, parts[0]), target, nil
+	root, err := filepath.Abs(options.RootPath)
+	if err != nil {
+		return "", "", fmt.Errorf("resolve resource root: %w", err)
+	}
+	source, err := filepath.Abs(filepath.Join(root, parts[0]))
+	if err != nil {
+		return "", "", fmt.Errorf("resolve config source: %w", err)
+	}
+	relative, err := filepath.Rel(root, source)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("config source escapes root: %s", parts[0])
+	}
+	return source, target, nil
 }
 
 func configMatches(target, source string) (bool, error) {
@@ -531,7 +594,26 @@ func matchingConfigs(declared []string, options Options) []string {
 	return matching
 }
 
-func printPlan(output io.Writer, plan Plan) {
+func printPlan(output io.Writer, plan Plan, format string) {
+	if format == "json" {
+		for _, stage := range []struct {
+			name string
+			plan StagePlan
+		}{
+			{name: "groups", plan: plan.Groups},
+			{name: "configs", plan: plan.Configs},
+			{name: "services", plan: plan.Services},
+		} {
+			_ = json.NewEncoder(output).Encode(map[string]any{
+				"stage":    stage.name,
+				"declared": stage.plan.Declared,
+				"adopted":  stage.plan.Adopted,
+				"missing":  stage.plan.Missing,
+				"extra":    stage.plan.Extra,
+			})
+		}
+		return
+	}
 	printStage(output, "GROUPS", plan.Groups)
 	printStage(output, "CONFIGS", plan.Configs)
 	printStage(output, "SERVICES", plan.Services)

@@ -22,6 +22,7 @@ type fakeSystem struct {
 	enabled       []string
 	disabled      []string
 	reloaded      []string
+	restarted     []string
 }
 
 func (f *fakeSystem) CurrentGroups(context.Context, string) ([]string, error) { return f.groups, nil }
@@ -52,6 +53,10 @@ func (f *fakeSystem) DisableService(_ context.Context, user bool, name string) e
 }
 func (f *fakeSystem) ReloadServices(_ context.Context, user bool) error {
 	f.reloaded = append(f.reloaded, serviceKey(user, "daemon-reload"))
+	return nil
+}
+func (f *fakeSystem) RestartService(_ context.Context, user bool, name string) error {
+	f.restarted = append(f.restarted, serviceKey(user, name))
 	return nil
 }
 
@@ -114,7 +119,16 @@ resources:
 	for _, selection := range []string{"extras", "hyprland", "i3"} {
 		s.Set(false, "current", "selections", selection)
 	}
-	configHome := filepath.Join(directory, "config")
+	configHome := filepath.Join(directory, "xdg-config")
+	if err := os.MkdirAll(filepath.Join(directory, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config", "docker"), []byte("docker\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config", "custom"), []byte("custom\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("XDG_CONFIG_HOME", configHome)
 	system := &fakeSystem{
 		groups:       []string{"docker"},
@@ -462,7 +476,7 @@ profiles:
 		services:     map[string]bool{},
 		serviceState: map[string]bool{},
 	}
-	options := Options{Profile: "desktop", RootPath: directory, User: "test-user", Yes: true}
+	options := Options{Profile: "desktop", RootPath: directory, User: "test-user", Yes: true, RestartServices: true}
 	plan, err := BuildPlan(context.Background(), m, s, options, system)
 	if err != nil {
 		t.Fatal(err)
@@ -478,6 +492,16 @@ profiles:
 	}
 	if !reflect.DeepEqual(system.enabled, []string{"user:tool.service"}) {
 		t.Fatalf("enabled services = %#v", system.enabled)
+	}
+	if !reflect.DeepEqual(system.restarted, []string{"user:tool.service"}) {
+		t.Fatalf("restarted services = %#v", system.restarted)
+	}
+}
+
+func TestConfigPathsRejectSourceOutsideRoot(t *testing.T) {
+	_, _, err := configPaths("../outside:$HOME/.config/example", Options{RootPath: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "escapes root") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

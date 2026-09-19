@@ -26,9 +26,8 @@ larger system provisioning workflows.
   serialized, and the executable is built as a static per-architecture Linux
   binary.
 
-The default integration owns package reconciliation only. Groups, configuration
-links, and services are also implemented as separately tested resource stages.
-The dotfiles adapter delegates all of them by default; package-only operation
+The default integration owns package reconciliation plus separately tested
+groups, configuration links, and service resource stages. Package-only operation
 is available through `sync --packages-only` and `package sync`.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for CLI usage, development commands,

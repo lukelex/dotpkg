@@ -42,7 +42,61 @@ func Load(path string) (*State, error) {
 	if data == nil {
 		data = map[string]any{}
 	}
+	if err := validate(data); err != nil {
+		return nil, fmt.Errorf("validate state %s: %w", path, err)
+	}
 	return &State{Path: path, Exists: true, Data: data}, nil
+}
+
+func validate(data map[string]any) error {
+	if version, ok := data["version"]; ok {
+		switch value := version.(type) {
+		case int:
+			if value != 1 {
+				return fmt.Errorf("unsupported version %d", value)
+			}
+		case uint64:
+			if value != 1 {
+				return fmt.Errorf("unsupported version %d", value)
+			}
+		default:
+			return fmt.Errorf("version must be 1")
+		}
+	}
+	if current, ok := data["current"]; ok {
+		if _, ok := current.(map[string]any); !ok {
+			return fmt.Errorf("current must be a mapping")
+		}
+	}
+	managed, ok := data["managed"]
+	if !ok {
+		return nil
+	}
+	managedMap, ok := managed.(map[string]any)
+	if !ok {
+		return fmt.Errorf("managed must be a mapping")
+	}
+	for _, name := range []string{"packages", "groups", "configs", "services"} {
+		if value, exists := managedMap[name]; exists {
+			if err := validateStringList(value, "managed."+name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateStringList(value any, path string) error {
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("%s must be a list of strings", path)
+	}
+	for index, item := range items {
+		if text, ok := item.(string); !ok || text == "" {
+			return fmt.Errorf("%s[%d] must be a non-empty string", path, index)
+		}
+	}
+	return nil
 }
 
 func defaultData() map[string]any {

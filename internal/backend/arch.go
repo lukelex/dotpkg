@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 type Arch struct {
@@ -44,7 +45,7 @@ func (OSRunner) Run(ctx context.Context, name string, args []string, directory s
 }
 
 func NewArch() *Arch {
-	return &Arch{HTTPClient: http.DefaultClient, Runner: OSRunner{}}
+	return &Arch{HTTPClient: &http.Client{Timeout: 30 * time.Second}, Runner: OSRunner{}}
 }
 
 func (a *Arch) IsInstalled(ctx context.Context, packageName string) (bool, error) {
@@ -74,6 +75,7 @@ func (a *Arch) RepositoryPackages(ctx context.Context) (map[string]struct{}, err
 }
 
 type aurResponse struct {
+	Error   string `json:"error"`
 	Results []struct {
 		Name string
 	} `json:"results"`
@@ -86,7 +88,7 @@ func (a *Arch) AURPackages(ctx context.Context, names []string) (map[string]stru
 	}
 	client := a.HTTPClient
 	if client == nil {
-		client = http.DefaultClient
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	for start := 0; start < len(names); start += 200 {
 		end := start + 200
@@ -97,37 +99,61 @@ func (a *Arch) AURPackages(ctx context.Context, names []string) (map[string]stru
 		for _, name := range names[start:end] {
 			query.Add("arg[]", name)
 		}
-		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://aur.archlinux.org/rpc/v5/info?"+query.Encode(), nil)
+		payload, err := a.aurBatch(ctx, client, query.Encode())
 		if err != nil {
-			return nil, fmt.Errorf("create AUR request: %w", err)
-		}
-		response, err := client.Do(request)
-		if err != nil {
-			return nil, fmt.Errorf("AUR request failed: %w", err)
-		}
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			if response.Body != nil {
-				response.Body.Close()
-			}
-			return nil, fmt.Errorf("AUR returned HTTP %s", response.Status)
-		}
-		if response.Body == nil {
-			return nil, fmt.Errorf("AUR response has no body")
-		}
-		var payload aurResponse
-		decodeError := json.NewDecoder(response.Body).Decode(&payload)
-		closeError := response.Body.Close()
-		if decodeError != nil {
-			return nil, fmt.Errorf("decode AUR response: %w", decodeError)
-		}
-		if closeError != nil {
-			return nil, fmt.Errorf("close AUR response: %w", closeError)
+			return nil, err
 		}
 		for _, packageInfo := range payload.Results {
 			result[packageInfo.Name] = struct{}{}
 		}
 	}
 	return result, nil
+}
+
+func (a *Arch) aurBatch(ctx context.Context, client *http.Client, query string) (aurResponse, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://aur.archlinux.org/rpc/v5/info?"+query, nil)
+		if err != nil {
+			return aurResponse{}, fmt.Errorf("create AUR request: %w", err)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			lastErr = fmt.Errorf("AUR request failed: %w", err)
+		} else if response.Body == nil {
+			lastErr = fmt.Errorf("AUR response has no body")
+		} else if response.StatusCode >= 500 || response.StatusCode == http.StatusTooManyRequests {
+			response.Body.Close()
+			lastErr = fmt.Errorf("AUR returned HTTP %s", response.Status)
+		} else if response.StatusCode < 200 || response.StatusCode >= 300 {
+			response.Body.Close()
+			return aurResponse{}, fmt.Errorf("AUR returned HTTP %s", response.Status)
+		} else {
+			var payload aurResponse
+			decodeError := json.NewDecoder(response.Body).Decode(&payload)
+			closeError := response.Body.Close()
+			if decodeError != nil {
+				return aurResponse{}, fmt.Errorf("decode AUR response: %w", decodeError)
+			}
+			if closeError != nil {
+				return aurResponse{}, fmt.Errorf("close AUR response: %w", closeError)
+			}
+			if payload.Error != "" {
+				return aurResponse{}, fmt.Errorf("AUR error: %s", payload.Error)
+			}
+			return payload, nil
+		}
+		if attempt < 2 {
+			timer := time.NewTimer(time.Duration(1<<attempt) * 100 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return aurResponse{}, ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
+	return aurResponse{}, lastErr
 }
 
 func (a *Arch) Install(ctx context.Context, repository, aur []string, profile string) error {
@@ -243,6 +269,13 @@ func (a *Arch) DisableService(ctx context.Context, user bool, service string) er
 func (a *Arch) ReloadServices(ctx context.Context, user bool) error {
 	if err := a.runSystemctl(ctx, user, "daemon-reload"); err != nil {
 		return fmt.Errorf("reload %s services: %w", serviceScope(user), err)
+	}
+	return nil
+}
+
+func (a *Arch) RestartService(ctx context.Context, user bool, service string) error {
+	if err := a.runSystemctl(ctx, user, "try-restart", service); err != nil {
+		return fmt.Errorf("restart service %s: %w", service, err)
 	}
 	return nil
 }

@@ -62,6 +62,10 @@ dotpkg plan --manifest packages.yaml --profile desktop
 dotpkg sync --manifest packages.yaml --profile desktop --yes
 ```
 
+Use `--output json` with `plan` or `sync` for machine-readable JSON Lines
+output. Resource mode emits one record for packages followed by records for
+groups, configs, and services.
+
 ## Custom resources
 
 Resource metadata may be attached to packages or declared independently. Use
