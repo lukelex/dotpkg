@@ -1,133 +1,31 @@
 # dotpkg
 
-`dotpkg` is a manifest-driven Linux package reconciler. Declare the packages a
-machine should have, preview the difference, and synchronize the system.
+`dotpkg` is a standalone, manifest-driven Linux package reconciler extracted
+from [lukelex/dotfiles](https://github.com/lukelex/dotfiles). Its goal is to
+make package installation reproducible, reviewable, and safe to integrate into
+larger system provisioning workflows.
 
-It is being extracted from the package portion of
-[lukelex/dotfiles](https://github.com/lukelex/dotfiles).
+## High-level mechanisms
 
-The first backend targets Arch Linux and uses `pacman` for repository packages
-and `yay` for AUR packages. The executable itself is intended to be a static,
-cross-distribution Linux binary; package backends remain distribution-specific.
+- **Manifest selection:** YAML manifests describe common packages, desktop or
+  server profiles, optional selections, package origins, and host overlays.
+- **Reconciliation:** The planner compares declared packages with the installed
+  system and managed ownership state, producing adopt, install, and remove
+  changes. Removal is restricted to packages previously recorded as managed.
+- **State preservation:** Package ownership, selections, profile, host, and
+  manifest identity are recorded atomically. Existing shared state retains
+  resource-stage fields that dotpkg does not own.
+- **Backend isolation:** Distribution-specific behavior lives behind a backend
+  interface. The current Arch backend uses `pacman`, `yay`, and the AUR RPC;
+  other backends can be added without changing manifest or planning logic.
+- **Safe execution:** Plans can be inspected before application, updates are
+  serialized, and the executable is built as a static per-architecture Linux
+  binary.
 
-## What it does
+The initial integration owns package reconciliation only. Groups, configuration
+links, services, and other system resources remain owned by the dotfiles Bash
+installer. The dotfiles package-stage adapter is opt-in, so the existing
+installer remains the fallback.
 
-- Reads YAML package manifests.
-- Supports desktop/server profiles and optional package groups.
-- Supports host-specific manifest overlays.
-- Validates repository and AUR package names.
-- Installs missing declared packages.
-- Removes only packages previously tracked as managed.
-- Records ownership and selections in a state file.
-- Provides dry-run planning before changes are applied.
-
-For example, a manifest can group packages by profile:
-
-```yaml
-source: aur
-common:
-  packages:
-    headless:
-      git: {}
-profiles:
-  desktop:
-    packages:
-      desktop:
-        neovim: {}
-```
-
-`dotpkg` compares that declaration with the installed system and produces a
-plan containing packages to install, remove, or adopt.
-
-## Current status
-
-This is the standalone extraction phase. It does **not** replace the Bash
-installer yet. The existing dotfiles installer remains the source of truth
-until this project covers its behavior and migration tests.
-
-The project currently provides an Arch Linux backend. It uses `pacman` for
-official repository packages and `yay` for AUR packages. The executable is
-designed to be a static Linux binary, while package backends remain
-distribution-specific.
-
-The package extraction is not yet wired into the dotfiles installer. Groups,
-configuration links, services, and other system setup remain managed by the
-original Bash implementation until compatibility work is complete.
-
-## Usage
-
-```text
-dotpkg validate --manifest packages.yaml --profile desktop
-dotpkg plan --manifest packages.yaml --profile desktop --state-file state.yaml
-dotpkg sync --manifest packages.yaml --profile desktop --state-file state.yaml
-dotpkg add lm_sensors --manifest packages.yaml --scope desktop
-```
-
-Host overlays are supplied with `--host PATH`. The state file can be supplied
-explicitly so an integration can continue using an existing state format.
-
-Use `plan` before `sync` when inspecting changes:
-
-```sh
-dotpkg plan --manifest packages.yaml --profile desktop
-dotpkg sync --manifest packages.yaml --profile desktop --yes
-```
-
-Package installation and removal still require the host's package-manager
-tools and appropriate privileges. The binary does not replace `pacman`, `yay`,
-or `sudo`.
-
-## Downloads
-
-Tagged GitHub releases will provide static binaries for:
-
-```text
-linux/amd64
-linux/arm64
-```
-
-One ELF binary cannot run on multiple CPU architectures, so “universal Linux
-binary” means one libc-independent binary per architecture.
-
-See [RELEASE.md](RELEASE.md) for checksum verification. The optional,
-not-yet-wired dotfiles package-stage adapter is in
-`integration/dotfiles-package-stage`; it requires an explicitly pinned binary
-path and never downloads a release.
-
-## Development
-
-```sh
-go test ./...
-go run ./cmd/dotpkg --help
-```
-
-Develop inside Docker with Docker Compose:
-
-```sh
-docker compose up -d --build dev
-docker compose exec dev go test ./...
-docker compose exec dev go vet ./...
-docker compose exec dev bash
-docker compose down
-```
-
-The source tree is mounted at `/workspace`; Go module and build caches use
-named volumes so they survive container recreation.
-
-Build the test or static runtime stages directly:
-
-```sh
-docker build --target test .
-docker build --target runtime --build-arg VERSION=v0.1.0-experimental.1 -t dotpkg:dev .
-```
-
-The runtime image contains only the static executable. Package reconciliation
-still requires host tools such as `pacman`, `yay`, and `sudo`.
-
-Release builds use `CGO_ENABLED=0` and include checksums. Run the test suite
-and static analysis before submitting changes:
-
-```sh
-go test ./...
-go vet ./...
-```
+See [DEVELOPMENT.md](DEVELOPMENT.md) for CLI usage, development commands,
+Docker workflows, integration instructions, and release details.
