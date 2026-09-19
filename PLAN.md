@@ -226,5 +226,7 @@ Before changing the dotfiles repository, verify all of the following:
 2. [x] Package names and origins match the Bash implementation.
 3. [x] State migration and ownership/removal behavior match.
 4. [x] A dry-run comparison shows equivalent changes.
-5. [x] The integration is opt-in and reversible.
-6. [x] The Bash implementation remains available as the fallback.
+5. [x] The integration uses a pinned release and retains an explicit
+   package-only path.
+6. [x] Existing package metadata remains supported alongside explicit custom
+   resources.
