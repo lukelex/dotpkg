@@ -60,8 +60,8 @@ dotpkg sync --manifest packages.yaml --profile desktop --yes
 
 ## Dotfiles integration
 
-The dotfiles repository keeps reconciliation in Bash by default. To enable the
-pinned standalone package and resource stages explicitly:
+The dotfiles repository uses the pinned standalone package and resource stages
+by default. To invoke them explicitly or document the intended mode:
 
 ```sh
 DOTPKG_PACKAGE_STAGE=1 ./linux/install/sync --desktop
