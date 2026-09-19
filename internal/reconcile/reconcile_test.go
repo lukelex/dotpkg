@@ -15,9 +15,10 @@ import (
 )
 
 type fakeBackend struct {
-	installed map[string]bool
-	install   []string
-	remove    []string
+	installed     map[string]bool
+	install       []string
+	remove        []string
+	removeProfile string
 }
 
 func TestWithLockRejectsConcurrentOperation(t *testing.T) {
@@ -279,8 +280,9 @@ func (f *fakeBackend) Install(_ context.Context, repository, aur []string, _ str
 	return nil
 }
 
-func (f *fakeBackend) Remove(_ context.Context, packages []string, _ string) error {
+func (f *fakeBackend) Remove(_ context.Context, packages []string, profile string) error {
 	f.remove = append(f.remove, packages...)
+	f.removeProfile = profile
 	return nil
 }
 
@@ -390,11 +392,122 @@ func TestSyncUpdatesStateAfterApply(t *testing.T) {
 	if strings.Join(fake.remove, ",") != "old-package" {
 		t.Fatalf("removed = %#v", fake.remove)
 	}
+	if fake.removeProfile != "desktop" {
+		t.Fatalf("remove profile = %q", fake.removeProfile)
+	}
 	loaded, err := state.Load(s.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := strings.Join(loaded.Packages(), ","); got != "bat,git" {
 		t.Fatalf("managed packages = %q", got)
+	}
+}
+
+func TestSyncUsesServerRemovalProfile(t *testing.T) {
+	manifestPath := testManifest(t)
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	s, err := state.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetPackages([]string{"old-package"})
+	if err := s.Write(); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeBackend{installed: map[string]bool{"git": true}}
+	if err := Sync(context.Background(), Options{
+		ManifestPath: manifestPath,
+		StatePath:    statePath,
+		Profile:      "server",
+		Yes:          true,
+	}, fake); err != nil {
+		t.Fatal(err)
+	}
+	if fake.removeProfile != "server" {
+		t.Fatalf("remove profile = %q", fake.removeProfile)
+	}
+}
+
+func TestSyncDryRunDoesNotWriteOrApply(t *testing.T) {
+	manifestPath := testManifest(t)
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	s, err := state.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Set(false, "current", "selections", "extras")
+	s.Set(false, "current", "selections", "hyprland")
+	s.Set(false, "current", "selections", "i3")
+	s.SetPackages([]string{"old-package"})
+	if err := s.Write(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	fake := &fakeBackend{installed: map[string]bool{"git": true}}
+	if err := Sync(context.Background(), Options{
+		ManifestPath: manifestPath,
+		StatePath:    statePath,
+		Profile:      "desktop",
+		DryRun:       true,
+		Output:       &output,
+	}, fake); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatal("dry-run changed state")
+	}
+	if len(fake.install) != 0 || len(fake.remove) != 0 {
+		t.Fatalf("dry-run applied changes: install=%#v remove=%#v", fake.install, fake.remove)
+	}
+	if strings.Contains(output.String(), "Apply packages changes") {
+		t.Fatal("dry-run prompted for confirmation")
+	}
+}
+
+func TestSyncDeclinedConfirmationDoesNotWriteState(t *testing.T) {
+	manifestPath := testManifest(t)
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	s, err := state.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Set(false, "current", "selections", "extras")
+	s.Set(false, "current", "selections", "hyprland")
+	s.Set(false, "current", "selections", "i3")
+	s.SetPackages([]string{"old-package"})
+	if err := s.Write(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeBackend{installed: map[string]bool{"git": true}}
+	if err := Sync(context.Background(), Options{
+		ManifestPath: manifestPath,
+		StatePath:    statePath,
+		Profile:      "desktop",
+		Input:        strings.NewReader("n\n"),
+	}, fake); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatal("declined sync changed state")
+	}
+	if len(fake.install) != 0 || len(fake.remove) != 0 {
+		t.Fatalf("declined sync applied changes: install=%#v remove=%#v", fake.install, fake.remove)
 	}
 }

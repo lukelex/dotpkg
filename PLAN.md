@@ -110,29 +110,29 @@ is used against the existing dotfiles state file.
 
 ### 1. Complete behavioral parity
 
-- [ ] Match current interactive prompts and defaults exactly.
-- [ ] Match current dry-run output and confirmation behavior closely enough for
+- [x] Match current interactive prompts and defaults exactly.
+- [x] Match current dry-run output and confirmation behavior closely enough for
   existing workflows.
-- [ ] Support all current `--host NAME` semantics, including host overlay paths
+- [x] Support all current `--host NAME` semantics, including host overlay paths
   and state recording.
-- [ ] Confirm package addition behavior for base manifests and host overlays.
-- [ ] Confirm package removal behavior for desktop and server profiles.
-- [ ] Confirm first-run adoption behavior for already-installed packages.
-- [ ] Preserve state fields owned by the dotfiles resource stages.
-- [ ] Add a lock to prevent concurrent manifest/state updates.
+- [x] Confirm package addition behavior for base manifests and host overlays.
+- [x] Confirm package removal behavior for desktop and server profiles.
+- [x] Confirm first-run adoption behavior for already-installed packages.
+- [x] Preserve state fields owned by the dotfiles resource stages.
+- [x] Add a lock to prevent concurrent manifest/state updates.
 
 ### 2. Test the Arch backend
 
 Add tests with fake command runners and mocked HTTP:
 
-- [ ] `pacman -Q` installed/not-installed handling
-- [ ] repository package listing
-- [ ] AUR RPC batching and error handling
-- [ ] repository installation
-- [ ] AUR installation
-- [ ] missing-`yay` bootstrap
-- [ ] desktop/server removal commands
-- [ ] command argument safety
+- [x] `pacman -Q` installed/not-installed handling
+- [x] repository package listing
+- [x] AUR RPC batching and error handling
+- [x] repository installation
+- [x] AUR installation
+- [x] missing-`yay` bootstrap
+- [x] desktop/server removal commands
+- [x] command argument safety
 
 Do not require a real Arch host or live AUR access in CI.
 
@@ -140,11 +140,11 @@ Do not require a real Arch host or live AUR access in CI.
 
 Create fixtures representing:
 
-- [ ] the current base manifest
-- [ ] a host overlay
-- [ ] a legacy state directory
-- [ ] a current shared state file
-- [ ] selected and unselected desktop options
+- [x] the current base manifest
+- [x] a host overlay
+- [x] a legacy state directory
+- [x] a current shared state file
+- [x] selected and unselected desktop options
 
 - [ ] Compare the standalone package lists against the Bash/yq implementation until
 the lists, origins, state transitions, and planned changes match.

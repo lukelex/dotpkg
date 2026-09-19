@@ -96,8 +96,20 @@ func TestCompatibilityFixtureSharedStatePreservesResourceOwnership(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.SetPackages([]string{"bat", "git"})
-	if err := s.Write(); err != nil {
+	m, err := manifest.Load(filepath.Join("..", "..", "testdata", "dotfiles-packages.yaml"), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installed := make(map[string]bool)
+	for _, packageName := range DeclaredPackages(m, PackageCategories(m, "desktop", true, s)) {
+		installed[packageName] = true
+	}
+	if err := Sync(context.Background(), Options{
+		ManifestPath: filepath.Join("..", "..", "testdata", "dotfiles-packages.yaml"),
+		StatePath:    statePath,
+		Profile:      "desktop",
+		Yes:          true,
+	}, &fakeBackend{installed: installed}); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := state.Load(statePath)
