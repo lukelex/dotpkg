@@ -1,0 +1,8 @@
+.git
+.github
+.dockerignore
+Dockerfile
+compose.yaml
+*.local
+coverage.out
+dist
