@@ -23,9 +23,10 @@ larger system provisioning workflows.
   binary.
 
 The default integration owns package reconciliation only. Groups, configuration
-links, and services are also implemented as separately tested resource stages;
-the dotfiles adapter can opt into them with `DOTPKG_RESOURCES=1`. The existing
-Bash installer remains the fallback unless that mode is explicitly enabled.
+links, and services are also implemented as separately tested resource stages.
+The dotfiles adapter delegates all of them when its standalone package stage is
+enabled; `DOTPKG_RESOURCES=0` retains package-only delegation. The existing
+Bash installer remains the default fallback.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for CLI usage, development commands,
 Docker workflows, integration instructions, and release details.

@@ -67,8 +67,9 @@ separately tested opt-in dotpkg stages:
 - system and user services
 - desktop resource setup and other system configuration remain Bash-owned
 
-The Bash implementation remains the default fallback; the full resource mode
-must stay explicitly opt-in until a stable release is reviewed.
+The Bash implementation remains the default fallback. Enabling the standalone
+package stage now enables the full resource mode; `DOTPKG_RESOURCES=0` is the
+explicit rollback to package-only delegation.
 
 ## Current compatibility contract
 
@@ -164,7 +165,8 @@ Once parity is established, add a dotfiles-side compatibility wrapper that:
 
 - [x] Keep the wrapper opt-in initially, for example through an environment
   variable or an explicit installer flag. Do not silently switch the default.
-- [x] Support an explicit `DOTPKG_RESOURCES=1` mode for full resource sync.
+- [x] Support full resource sync with an explicit package-stage opt-in and a
+  `DOTPKG_RESOURCES=0` rollback.
 
 ### 5. Migrate resource stages or formalize the boundary
 
