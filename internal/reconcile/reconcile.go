@@ -63,6 +63,9 @@ func (o Options) normalize() (Options, error) {
 	if o.Input == nil {
 		o.Input = os.Stdin
 	}
+	if _, buffered := o.Input.(*bufio.Reader); !buffered {
+		o.Input = bufio.NewReader(o.Input)
+	}
 	if o.Output == nil {
 		o.Output = os.Stdout
 	}
@@ -101,6 +104,11 @@ func Load(options Options) (*manifest.Manifest, *state.State, Options, error) {
 }
 
 func EnsureSelections(m *manifest.Manifest, s *state.State, options Options) (bool, error) {
+	normalized, err := options.normalize()
+	if err != nil {
+		return false, err
+	}
+	options = normalized
 	if options.Profile == "server" {
 		return false, nil
 	}
@@ -122,7 +130,8 @@ func EnsureSelections(m *manifest.Manifest, s *state.State, options Options) (bo
 			return false, fmt.Errorf("no recorded desktop selection for %s; run sync without --dry-run first", selection.name)
 		}
 		packages := m.PackageNames(selection.path)
-		selected, err := askSelection(options, fmt.Sprintf("%s includes: %s\nInstall %s? [y/N] ", selection.label, strings.Join(packages, ", "), selection.label), false)
+		fmt.Fprintf(options.Output, "\n%s includes:\n  %s\n", selection.label, strings.Join(packages, ", "))
+		selected, err := askSelection(options, fmt.Sprintf("Install %s? [y/N] ", selection.label), false)
 		if err != nil {
 			return false, err
 		}
@@ -136,13 +145,8 @@ func EnsureSelections(m *manifest.Manifest, s *state.State, options Options) (bo
 		if options.DryRun {
 			return false, fmt.Errorf("no recorded desktop selection for option %s; run sync without --dry-run first", option)
 		}
-		value, _ := m.Value("profiles.desktop.options." + option + ".default").(string)
-		defaultSelected := value == "yes"
-		prompt, _ := m.Value("profiles.desktop.options." + option + ".prompt").(string)
-		if prompt == "" {
-			prompt = "Install optional set '" + option + "'?"
-		}
-		selected, err := askSelection(options, prompt+" ", defaultSelected)
+		fmt.Fprintf(options.Output, "\nOptional set %s includes:\n  %s\n", option, strings.Join(m.OptionPackages(option), ", "))
+		selected, err := askSelection(options, "Install optional set '"+option+"'? [y/N] ", false)
 		if err != nil {
 			return false, err
 		}
@@ -154,12 +158,16 @@ func EnsureSelections(m *manifest.Manifest, s *state.State, options Options) (bo
 
 func askSelection(options Options, prompt string, defaultSelected bool) (bool, error) {
 	if options.Yes {
-		return defaultSelected, nil
+		return true, nil
 	}
 	if _, err := fmt.Fprint(options.Output, prompt); err != nil {
 		return false, err
 	}
-	answer, err := bufio.NewReader(options.Input).ReadString('\n')
+	reader, ok := options.Input.(*bufio.Reader)
+	if !ok {
+		reader = bufio.NewReader(options.Input)
+	}
+	answer, err := reader.ReadString('\n')
 	if err != nil && !errors.Is(err, io.EOF) {
 		return false, err
 	}
@@ -304,7 +312,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	}
 	apply := options.Yes
 	if !options.Yes {
-		apply, err = askSelection(options, "Apply package changes? [y/N] ", false)
+		apply, err = askSelection(options, "Apply packages changes? [y/N] ", false)
 		if err != nil {
 			return err
 		}

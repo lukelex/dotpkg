@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -139,8 +140,9 @@ func TestSyncAdoptsInstalledPackagesOnFirstRun(t *testing.T) {
 	manifestPath := testManifest(t)
 	statePath := filepath.Join(t.TempDir(), "state.yaml")
 	fake := &fakeBackend{installed: map[string]bool{
-		"git": true,
-		"bat": true,
+		"git":   true,
+		"bat":   true,
+		"extra": true,
 	}}
 	if err := Sync(context.Background(), Options{
 		ManifestPath: manifestPath,
@@ -154,11 +156,104 @@ func TestSyncAdoptsInstalledPackagesOnFirstRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := strings.Join(loaded.Packages(), ","); got != "bat,git" {
+	if got := strings.Join(loaded.Packages(), ","); got != "bat,extra,git" {
 		t.Fatalf("adopted packages = %q", got)
 	}
 	if len(fake.install) != 0 {
 		t.Fatalf("installed already-present packages = %#v", fake.install)
+	}
+}
+
+func TestEnsureSelectionsMatchesInteractivePromptsAndConsumesAnswers(t *testing.T) {
+	directory := t.TempDir()
+	manifestPath := filepath.Join(directory, "packages.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`source: repo
+profiles:
+  desktop:
+    packages:
+      desktop: {}
+      extras:
+        extra: {}
+      hyprland:
+        hypr: {}
+      i3:
+        i3: {}
+    options:
+      optional:
+        default: yes
+        prompt: This prompt comes from metadata
+        packages:
+          optional-package: {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Load(manifestPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := state.Load(filepath.Join(directory, "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var output strings.Builder
+	options, err := (Options{
+		ManifestPath: manifestPath,
+		Profile:      "desktop",
+		Input:        strings.NewReader("y\nn\ny\ny\n"),
+		Output:       &output,
+	}).normalize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := EnsureSelections(m, s, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("selections were not changed")
+	}
+	want := map[string]bool{
+		"extras":           true,
+		"hyprland":         false,
+		"i3":               true,
+		"options.optional": true,
+	}
+	for path, expected := range want {
+		parts := strings.Split(path, ".")
+		got, recorded := s.Selection(parts...)
+		if !recorded || got != expected {
+			t.Fatalf("selection %s = %v, recorded = %v", path, got, recorded)
+		}
+	}
+	if strings.Contains(output.String(), "This prompt comes from metadata") {
+		t.Fatal("manifest prompt was used instead of compatibility prompt")
+	}
+	if !strings.Contains(output.String(), "Optional set optional includes:\n  optional-package\nInstall optional set 'optional'? [y/N] ") {
+		t.Fatalf("optional prompt output = %q", output.String())
+	}
+}
+
+func TestEnsureSelectionsYesSelectsAllMissingSelections(t *testing.T) {
+	manifestPath := testManifest(t)
+	m, err := manifest.Load(manifestPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := state.Load(filepath.Join(t.TempDir(), "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed, err := EnsureSelections(m, s, Options{Profile: "desktop", Yes: true, Output: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !changed {
+		t.Fatal("selections were not changed")
+	}
+	for _, selection := range []string{"extras", "hyprland", "i3"} {
+		if selected, recorded := s.Selection(selection); !recorded || !selected {
+			t.Fatalf("selection %s = %v, recorded = %v", selection, selected, recorded)
+		}
 	}
 }
 

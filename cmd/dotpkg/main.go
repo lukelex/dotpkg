@@ -257,6 +257,9 @@ func addLocked(ctx context.Context, packageName, requestedScope string, options 
 }
 
 func chooseScope(options reconcile.Options, packageName string) (string, error) {
+	if options.Yes {
+		return options.Profile, nil
+	}
 	if options.DryRun {
 		fmt.Fprintf(options.Output, "dry-run: default package scope is %s\n", options.Profile)
 		return options.Profile, nil
