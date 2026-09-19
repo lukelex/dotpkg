@@ -169,6 +169,92 @@ func (a *Arch) Remove(ctx context.Context, packages []string, profile string) er
 	return nil
 }
 
+func (a *Arch) CurrentGroups(ctx context.Context, username string) ([]string, error) {
+	output, err := a.Runner.Output(ctx, "id", []string{"-nG", username})
+	if err != nil {
+		return nil, fmt.Errorf("list groups for %s: %w", username, err)
+	}
+	return strings.Fields(string(output)), nil
+}
+
+func (a *Arch) GroupExists(ctx context.Context, group string) (bool, error) {
+	_, err := a.Runner.Output(ctx, "getent", []string{"group", group})
+	if err == nil {
+		return true, nil
+	}
+	if code, ok := exitCode(err); ok && code == 2 {
+		return false, nil
+	}
+	return false, fmt.Errorf("check group %s: %w", group, err)
+}
+
+func (a *Arch) AddToGroup(ctx context.Context, username, group string) error {
+	if err := a.Runner.Run(ctx, "sudo", []string{"usermod", "-aG", group, username}, ""); err != nil {
+		return fmt.Errorf("add %s to group %s: %w", username, group, err)
+	}
+	return nil
+}
+
+func (a *Arch) RemoveFromGroup(ctx context.Context, username, group string) error {
+	if err := a.Runner.Run(ctx, "sudo", []string{"gpasswd", "-d", username, group}, ""); err != nil {
+		return fmt.Errorf("remove %s from group %s: %w", username, group, err)
+	}
+	return nil
+}
+
+func (a *Arch) ServiceExists(ctx context.Context, user bool, service string) (bool, error) {
+	args := serviceArgs(user, "cat", service)
+	_, err := a.Runner.Output(ctx, "systemctl", args)
+	if err == nil {
+		return true, nil
+	}
+	if code, ok := exitCode(err); ok && code == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("check service %s: %w", service, err)
+}
+
+func (a *Arch) ServiceEnabled(ctx context.Context, user bool, service string) (bool, error) {
+	args := serviceArgs(user, "is-enabled", "--quiet", service)
+	_, err := a.Runner.Output(ctx, "systemctl", args)
+	if err == nil {
+		return true, nil
+	}
+	if code, ok := exitCode(err); ok && code == 1 {
+		return false, nil
+	}
+	return false, fmt.Errorf("check enabled service %s: %w", service, err)
+}
+
+func (a *Arch) EnableService(ctx context.Context, user bool, service string) error {
+	if err := a.Runner.Run(ctx, "systemctl", serviceArgs(user, "enable", "--now", service), ""); err != nil {
+		return fmt.Errorf("enable service %s: %w", service, err)
+	}
+	return nil
+}
+
+func (a *Arch) DisableService(ctx context.Context, user bool, service string) error {
+	if err := a.Runner.Run(ctx, "systemctl", serviceArgs(user, "disable", "--now", service), ""); err != nil {
+		return fmt.Errorf("disable service %s: %w", service, err)
+	}
+	return nil
+}
+
+func serviceArgs(user bool, args ...string) []string {
+	if user {
+		return append([]string{"--user"}, args...)
+	}
+	return args
+}
+
+func exitCode(err error) (int, bool) {
+	var exitError interface{ ExitCode() int }
+	if errors.As(err, &exitError) {
+		return exitError.ExitCode(), true
+	}
+	return 0, false
+}
+
 func (a *Arch) bootstrapYay(ctx context.Context) error {
 	if _, err := a.Runner.LookPath("git"); err != nil {
 		return fmt.Errorf("git is required to bootstrap yay: %w", err)

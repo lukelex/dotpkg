@@ -304,3 +304,61 @@ func TestBootstrapYayUsesTemporaryCheckout(t *testing.T) {
 	}
 	t.Fatal("git clone was not called")
 }
+
+func TestArchResourceCommands(t *testing.T) {
+	runner := &fakeRunner{
+		outputs: map[string]fakeOutput{
+			"id":        {value: []byte("wheel docker\n")},
+			"getent":    {value: []byte("docker:x:991:user\n")},
+			"systemctl": {value: []byte("enabled\n")},
+		},
+	}
+	arch := &Arch{Runner: runner}
+
+	groups, err := arch.CurrentGroups(context.Background(), "lukas")
+	if err != nil || !reflect.DeepEqual(groups, []string{"wheel", "docker"}) {
+		t.Fatalf("groups = %#v, error = %v", groups, err)
+	}
+	if exists, err := arch.GroupExists(context.Background(), "docker"); err != nil || !exists {
+		t.Fatalf("group exists = %v, error = %v", exists, err)
+	}
+	if exists, err := arch.ServiceExists(context.Background(), true, "example.service"); err != nil || !exists {
+		t.Fatalf("service exists = %v, error = %v", exists, err)
+	}
+	if enabled, err := arch.ServiceEnabled(context.Background(), true, "example.service"); err != nil || !enabled {
+		t.Fatalf("service enabled = %v, error = %v", enabled, err)
+	}
+	if err := arch.AddToGroup(context.Background(), "lukas", "video"); err != nil {
+		t.Fatal(err)
+	}
+	if err := arch.RemoveFromGroup(context.Background(), "lukas", "docker"); err != nil {
+		t.Fatal(err)
+	}
+	if err := arch.EnableService(context.Background(), true, "example.service"); err != nil {
+		t.Fatal(err)
+	}
+	if err := arch.DisableService(context.Background(), false, "docker.service"); err != nil {
+		t.Fatal(err)
+	}
+
+	var runs []runnerCall
+	for _, call := range runner.calls {
+		if call.kind == "run" {
+			runs = append(runs, call)
+		}
+	}
+	want := [][]string{
+		{"usermod", "-aG", "video", "lukas"},
+		{"gpasswd", "-d", "lukas", "docker"},
+		{"--user", "enable", "--now", "example.service"},
+		{"disable", "--now", "docker.service"},
+	}
+	if len(runs) != len(want) {
+		t.Fatalf("run calls = %#v", runs)
+	}
+	for index, call := range runs {
+		if !reflect.DeepEqual(call.args, want[index]) {
+			t.Fatalf("run %d args = %#v, want %#v", index, call.args, want[index])
+		}
+	}
+}
