@@ -169,3 +169,148 @@ func TestSyncDoesNotTrackUnavailableResources(t *testing.T) {
 		t.Fatalf("tracked services = %q", got)
 	}
 }
+
+func TestCurrentManifestResourceSetsMatchBashFixtures(t *testing.T) {
+	manifestPath := filepath.Join("..", "..", "testdata", "dotfiles-packages.yaml")
+	m, err := manifest.Load(manifestPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name  string
+		state string
+	}{
+		{name: "selected", state: "selected-state.yaml"},
+		{name: "unselected", state: "unselected-state.yaml"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			s, err := state.Load(filepath.Join("..", "..", "testdata", "fixtures", test.state))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := declaredMetadata(m, s, "desktop", "groups"), readResourceFixture(t, "expected-desktop-"+test.name+"-groups.txt"); !reflect.DeepEqual(got, want) {
+				t.Fatalf("groups = %#v, want %#v", got, want)
+			}
+			if got, want := declaredMetadata(m, s, "desktop", "configs"), readResourceFixture(t, "expected-desktop-"+test.name+"-configs.txt"); !reflect.DeepEqual(got, want) {
+				t.Fatalf("configs = %#v, want %#v", got, want)
+			}
+			if got, want := declaredServices(m, s, "desktop"), readResourceFixture(t, "expected-desktop-"+test.name+"-services.txt"); !reflect.DeepEqual(got, want) {
+				t.Fatalf("services = %#v, want %#v", got, want)
+			}
+		})
+	}
+
+	s, err := state.Load(filepath.Join("..", "..", "testdata", "fixtures", "selected-state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"groups", "configs"} {
+		if got, want := declaredMetadata(m, s, "server", key), readResourceFixture(t, "expected-server-"+key+".txt"); !reflect.DeepEqual(got, want) {
+			t.Fatalf("server %s = %#v, want %#v", key, got, want)
+		}
+	}
+	if got, want := declaredServices(m, s, "server"), readResourceFixture(t, "expected-server-services.txt"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("server services = %#v, want %#v", got, want)
+	}
+}
+
+func TestSyncRemovesOnlyTrackedResourcesAndPreservesOtherState(t *testing.T) {
+	m, s, options, system := resourceFixture(t)
+	configMapping := "config/docker:$XDG_CONFIG_HOME/docker"
+	configTarget := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "docker")
+	configSource := filepath.Join(options.RootPath, "config/docker")
+	if err := os.MkdirAll(filepath.Dir(configTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(configSource, configTarget); err != nil {
+		t.Fatal(err)
+	}
+
+	s.SetItems([]string{"docker", "video"}, "managed", "groups")
+	s.SetItems([]string{configMapping}, "managed", "configs")
+	s.SetItems([]string{"docker", "user:desktop.service"}, "managed", "services")
+	s.SetItems([]string{"git"}, "managed", "packages")
+	s.Set("keep-me", "current", "unrelated")
+	s.Set("also-keep-me", "managed", "unrelated")
+	system.serviceState["user:desktop.service"] = true
+
+	common := m.Data["common"].(map[string]any)
+	packages := common["packages"].(map[string]any)
+	headless := packages["headless"].(map[string]any)
+	delete(headless, "docker")
+
+	options.Yes = true
+	if err := Sync(context.Background(), m, s, options, system); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(system.removedGroups, []string{"docker"}) {
+		t.Fatalf("removed groups = %#v", system.removedGroups)
+	}
+	if !reflect.DeepEqual(system.disabled, []string{"docker"}) {
+		t.Fatalf("disabled services = %#v", system.disabled)
+	}
+	if _, err := os.Lstat(configTarget); !os.IsNotExist(err) {
+		t.Fatalf("config target error = %v, want removed", err)
+	}
+
+	loaded, err := state.Load(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(loaded.Items("managed", "groups"), ","); got != "video" {
+		t.Fatalf("remaining groups = %q", got)
+	}
+	if got := strings.Join(loaded.Items("managed", "configs"), ","); got != "" {
+		t.Fatalf("remaining configs = %q", got)
+	}
+	if got := strings.Join(loaded.Items("managed", "services"), ","); got != "user:desktop.service" {
+		t.Fatalf("remaining services = %q", got)
+	}
+	if got := strings.Join(loaded.Packages(), ","); got != "git" {
+		t.Fatalf("packages = %q", got)
+	}
+	if got, _ := loaded.Get("current", "unrelated"); got != "keep-me" {
+		t.Fatalf("current unrelated state = %#v", got)
+	}
+	if got, _ := loaded.Get("managed", "unrelated"); got != "also-keep-me" {
+		t.Fatalf("managed unrelated state = %#v", got)
+	}
+}
+
+func TestConfigConflictRequiresReplace(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source")
+	target := filepath.Join(directory, "config", "target")
+	if err := os.WriteFile(source, []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkConfig(source, target, false); err == nil {
+		t.Fatal("linkConfig without replace succeeded for an existing file")
+	}
+	if err := linkConfig(source, target, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(target); err != nil || got != source {
+		t.Fatalf("replaced config link = %q, error = %v", got, err)
+	}
+}
+
+func readResourceFixture(t *testing.T, name string) []string {
+	t.Helper()
+	contents, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fixtures", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents = []byte(strings.TrimSpace(string(contents)))
+	if len(contents) == 0 {
+		return nil
+	}
+	return strings.Split(string(contents), "\n")
+}

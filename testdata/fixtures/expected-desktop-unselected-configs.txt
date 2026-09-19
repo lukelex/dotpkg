@@ -1,0 +1,16 @@
+linux/config/bluetooth-notify/bluetooth-notify.service:$XDG_CONFIG_HOME/systemd/user/bluetooth-notify.service
+linux/config/default-apps.list:$HOME/.local/share/applications/defaults.list
+linux/config/fonts.conf:$XDG_CONFIG_HOME/fontconfig/fonts.conf
+linux/config/gammastep/config.ini:$XDG_CONFIG_HOME/gammastep/config.ini
+linux/config/gammastep/night-mode-sunset.service:$XDG_CONFIG_HOME/systemd/user/night-mode-sunset.service
+linux/config/gammastep/night-mode-sunset.timer:$XDG_CONFIG_HOME/systemd/user/night-mode-sunset.timer
+linux/config/kitty:$XDG_CONFIG_HOME/kitty
+linux/config/mimeapps.conf:$HOME/.local/share/applications/mimeapps.list
+linux/config/mimeapps.conf:$XDG_CONFIG_HOME/mimeapps.list
+linux/config/nvim:$XDG_CONFIG_HOME/nvim
+linux/config/opencode:$XDG_CONFIG_HOME/opencode
+linux/config/quickshell/quickshell.service:$XDG_CONFIG_HOME/systemd/user/quickshell.service
+linux/config/quickshell:$XDG_CONFIG_HOME/quickshell
+linux/config/usb-notify/usb-notify.service:$XDG_CONFIG_HOME/systemd/user/usb-notify.service
+linux/config/zsh/zshrc:$HOME/.zshrc
+linux/profile:$HOME/.profile

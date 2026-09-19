@@ -1,0 +1,10 @@
+NetworkManager
+avahi-daemon
+bluetooth
+cups
+docker
+nordvpnd
+user:bluetooth-notify.service
+user:gammastep.service
+user:night-mode-sunset.timer
+user:usb-notify.service

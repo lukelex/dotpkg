@@ -1,0 +1,3 @@
+linux/config/nvim:$XDG_CONFIG_HOME/nvim
+linux/config/opencode:$XDG_CONFIG_HOME/opencode
+linux/config/zsh/zshrc:$HOME/.zshrc
