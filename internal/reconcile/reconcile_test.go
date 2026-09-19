@@ -348,6 +348,16 @@ func TestBuildPlanAdoptsMissingAndRemovesOnlyManaged(t *testing.T) {
 	}
 }
 
+func TestDefaultManifestPathUsesEnvironmentOverride(t *testing.T) {
+	t.Setenv("DOTPKG_MANIFEST", "/etc/dotpkg/packages.yaml")
+	if got := DefaultManifestPath(); got != "/etc/dotpkg/packages.yaml" {
+		t.Fatalf("default manifest = %q", got)
+	}
+	if got, err := (Options{}).normalize(); err != nil || got.ManifestPath != "/etc/dotpkg/packages.yaml" {
+		t.Fatalf("normalized manifest = %q, error = %v", got.ManifestPath, err)
+	}
+}
+
 func TestCurrentDotfilesManifestHasSameSelectedPackageCount(t *testing.T) {
 	path := filepath.Join("..", "..", "testdata", "dotfiles-packages.yaml")
 	m, err := manifest.Load(path, "")

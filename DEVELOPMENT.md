@@ -50,6 +50,10 @@ dotpkg sync --manifest packages.yaml --profile desktop --state-file state.yaml
 dotpkg add lm_sensors --manifest packages.yaml --scope desktop
 ```
 
+Use `--manifest PATH` to select a different manifest, or set
+`DOTPKG_MANIFEST=PATH` for a wrapper-wide default. Resource paths still resolve
+from the inferred manifest root unless `--root PATH` is supplied explicitly.
+
 Host overlays are supplied with `--host PATH`. Use `plan` before `sync` to
 inspect changes without modifying the system:
 

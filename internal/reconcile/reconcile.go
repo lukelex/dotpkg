@@ -40,13 +40,23 @@ type Plan struct {
 	Extra    []string
 }
 
+// DefaultManifestPath returns the manifest selected when --manifest is not
+// supplied. The environment override is useful for wrappers and installations
+// that keep the manifest outside the current working directory.
+func DefaultManifestPath() string {
+	if path := os.Getenv("DOTPKG_MANIFEST"); path != "" {
+		return path
+	}
+	return "packages.yaml"
+}
+
 func (p Plan) Changes() int {
 	return len(p.Adopted) + len(p.Missing) + len(p.Extra)
 }
 
 func (o Options) normalize() (Options, error) {
 	if o.ManifestPath == "" {
-		o.ManifestPath = "packages.yaml"
+		o.ManifestPath = DefaultManifestPath()
 	}
 	if o.StatePath == "" {
 		stateHome := os.Getenv("XDG_STATE_HOME")

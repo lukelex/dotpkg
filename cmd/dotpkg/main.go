@@ -98,7 +98,7 @@ type commonFlags struct {
 }
 
 func (f *commonFlags) register(set *flag.FlagSet) {
-	set.StringVar(&f.manifest, "manifest", "packages.yaml", "package manifest")
+	set.StringVar(&f.manifest, "manifest", reconcile.DefaultManifestPath(), "package manifest")
 	set.StringVar(&f.host, "host", "", "host overlay")
 	set.StringVar(&f.state, "state-file", "", "state file")
 	set.StringVar(&f.profile, "profile", "desktop", "profile")
