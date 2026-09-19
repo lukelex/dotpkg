@@ -300,6 +300,42 @@ func TestConfigConflictRequiresReplace(t *testing.T) {
 	if got, err := os.Readlink(target); err != nil || got != source {
 		t.Fatalf("replaced config link = %q, error = %v", got, err)
 	}
+	if err := os.Remove(target); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(target, "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkConfig(source, target, false); err == nil {
+		t.Fatal("linkConfig without replace succeeded for an existing directory")
+	}
+	if err := linkConfig(source, target, true); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(target); err != nil || got != source {
+		t.Fatalf("replaced directory link = %q, error = %v", got, err)
+	}
+}
+
+func TestSyncSkipsConfigConflictWithoutTrackingIt(t *testing.T) {
+	m, s, options, system := resourceFixture(t)
+	target := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "docker")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("user data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	options.Yes = true
+	if err := Sync(context.Background(), m, s, options, system); err != nil {
+		t.Fatal(err)
+	}
+	if contents, err := os.ReadFile(target); err != nil || string(contents) != "user data" {
+		t.Fatalf("conflicting config contents = %q, error = %v", contents, err)
+	}
+	if got := s.Items("managed", "configs"); len(got) != 0 {
+		t.Fatalf("tracked conflicting configs = %#v", got)
+	}
 }
 
 func readResourceFixture(t *testing.T, name string) []string {

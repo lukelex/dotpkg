@@ -3,6 +3,7 @@ package resource
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -53,6 +54,8 @@ type Plan struct {
 	Configs  StagePlan
 	Services StagePlan
 }
+
+var errConfigConflict = errors.New("config target conflict")
 
 func (p Plan) Changes() int {
 	return p.Groups.Changes() + p.Configs.Changes() + p.Services.Changes()
@@ -120,6 +123,9 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		items = subtract(items, stage.plan.Extra)
 		items = append(items, stage.plan.Adopted...)
 		items = append(items, stage.plan.Missing...)
+		if stage.name == "configs" {
+			items = matchingConfigs(stage.plan.Declared, options)
+		}
 		s.SetItems(items, stage.path...)
 	}
 	return s.Write()
@@ -300,6 +306,10 @@ func applyConfigs(plan StagePlan, options Options) error {
 			return err
 		}
 		if err := linkConfig(source, target, options.Replace); err != nil {
+			if errors.Is(err, errConfigConflict) {
+				fmt.Fprintf(options.Output, "skipping %s: exists and is not a repo link; use --replace to overwrite\n", target)
+				continue
+			}
 			return err
 		}
 	}
@@ -367,7 +377,7 @@ func configMatches(target, source string) (bool, error) {
 }
 
 func linkConfig(source, target string, replace bool) error {
-	if existing, err := os.Lstat(target); err == nil {
+	if _, err := os.Lstat(target); err == nil {
 		matches, matchErr := configMatches(target, source)
 		if matchErr != nil {
 			return matchErr
@@ -375,10 +385,10 @@ func linkConfig(source, target string, replace bool) error {
 		if matches {
 			return nil
 		}
-		if !replace || existing.IsDir() && existing.Mode()&os.ModeSymlink == 0 {
-			return fmt.Errorf("config target exists and is not the declared link: %s", target)
+		if !replace {
+			return fmt.Errorf("%w: %s", errConfigConflict, target)
 		}
-		if err := os.Remove(target); err != nil {
+		if err := os.RemoveAll(target); err != nil {
 			return fmt.Errorf("replace config target %s: %w", target, err)
 		}
 	} else if !os.IsNotExist(err) {
@@ -391,6 +401,21 @@ func linkConfig(source, target string, replace bool) error {
 		return fmt.Errorf("link config %s: %w", target, err)
 	}
 	return nil
+}
+
+func matchingConfigs(declared []string, options Options) []string {
+	matching := make([]string, 0, len(declared))
+	for _, mapping := range declared {
+		source, target, err := configPaths(mapping, options)
+		if err != nil {
+			continue
+		}
+		matches, err := configMatches(target, source)
+		if err == nil && matches {
+			matching = append(matching, mapping)
+		}
+	}
+	return matching
 }
 
 func printPlan(output io.Writer, plan Plan) {
