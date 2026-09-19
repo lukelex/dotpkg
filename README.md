@@ -22,10 +22,10 @@ larger system provisioning workflows.
   serialized, and the executable is built as a static per-architecture Linux
   binary.
 
-The initial integration owns package reconciliation only. Groups, configuration
-links, services, and other system resources remain owned by the dotfiles Bash
-installer. The dotfiles package-stage adapter is opt-in, so the existing
-installer remains the fallback.
+The default integration owns package reconciliation only. Groups, configuration
+links, and services are also implemented as separately tested resource stages;
+the dotfiles adapter can opt into them with `DOTPKG_RESOURCES=1`. The existing
+Bash installer remains the fallback unless that mode is explicitly enabled.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for CLI usage, development commands,
 Docker workflows, integration instructions, and release details.

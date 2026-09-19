@@ -58,18 +58,17 @@ repositories/releases.
 
 ## Important boundary
 
-The first extraction should replace only package reconciliation. The current
-dotfiles `sync` command also handles resources that should remain in the
-dotfiles repository initially:
+The default extraction replaces package reconciliation first. The dotfiles
+`sync` command also handles resources, which are now available through
+separately tested opt-in dotpkg stages:
 
 - Unix group membership
 - config symlinks
 - system and user services
-- desktop resource setup
-- other system configuration
+- desktop resource setup and other system configuration remain Bash-owned
 
-Do not replace `linux/install/sync`, `linux/install/package`, or
-`linux/install/validate-packages` yet.
+The Bash implementation remains the default fallback; the full resource mode
+must stay explicitly opt-in until a stable release is reviewed.
 
 ## Current compatibility contract
 
@@ -85,8 +84,10 @@ package-name:
     user: [...]
 ```
 
-`dotpkg` must preserve and ignore unknown metadata until the dotfiles resource
-stages are migrated. The current shared state shape is:
+`dotpkg` preserves package metadata and ignores resource fields in package-only
+mode. Resource mode consumes only the supported groups, config, and service
+fields; other metadata remains available to the dotfiles installer. The current
+shared state shape is:
 
 ```yaml
 version: 1
@@ -102,9 +103,11 @@ managed:
   services: [...]
 ```
 
-The package executable should only modify `current.profile`, `current.host`,
-`current.manifest_sha256`, `current.selections`, and `managed.packages` when it
-is used against the existing dotfiles state file.
+Without `--resources`, the package executable only modifies
+`current.profile`, `current.host`, `current.manifest_sha256`,
+`current.selections`, and `managed.packages` when used against the existing
+dotfiles state file. With `--resources`, it additionally owns the managed
+groups, configs, and services fields.
 
 ## Remaining work before a swap
 
@@ -157,18 +160,20 @@ Once parity is established, add a dotfiles-side compatibility wrapper that:
 - [x] passes the existing manifest and state paths explicitly
 - [x] translates existing profile/host flags
 - [x] invokes `dotpkg sync` for the package stage only
-- [x] leaves groups, configs, and services in Bash
+- [x] leaves groups, configs, and services in Bash in package-only mode
 
 - [x] Keep the wrapper opt-in initially, for example through an environment
   variable or an explicit installer flag. Do not silently switch the default.
+- [x] Support an explicit `DOTPKG_RESOURCES=1` mode for full resource sync.
 
 ### 5. Migrate resource stages or formalize the boundary
 
-- [x] Decide that groups, config links, and services remain dotfiles-specific for
-  the initial extraction. If they move into `dotpkg` later, add separate resource
-  modules and tests rather than coupling them directly to package installation.
+- [x] Add separate resource modules and tests for groups, config links, and
+  services rather than coupling them directly to package installation.
+- [x] Add an explicit dotfiles full-resource mode that delegates these stages
+  without changing the default Bash path.
 
-- [x] Do not switch the eventual full sync until these stages have parity.
+- [x] Do not switch the default full sync until these stages have parity.
 
 ### 6. Release process
 
