@@ -339,11 +339,11 @@ func TestConfigConflictRequiresReplace(t *testing.T) {
 	if err := linkConfig(source, target, false); err == nil {
 		t.Fatal("linkConfig without replace succeeded for an existing directory")
 	}
-	if err := linkConfig(source, target, true); err != nil {
-		t.Fatal(err)
+	if err := linkConfig(source, target, true); err == nil {
+		t.Fatal("linkConfig removed an existing directory")
 	}
-	if got, err := os.Readlink(target); err != nil || got != source {
-		t.Fatalf("replaced directory link = %q, error = %v", got, err)
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Fatalf("directory target changed: info=%v error=%v", info, err)
 	}
 }
 
@@ -502,6 +502,31 @@ func TestConfigPathsRejectSourceOutsideRoot(t *testing.T) {
 	_, _, err := configPaths("../outside:$HOME/.config/example", Options{RootPath: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "escapes root") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestConfigPathsRejectRelativeTarget(t *testing.T) {
+	_, _, err := configPaths("config/example:relative/path", Options{RootPath: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "target must be absolute") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestConfigConflictDoesNotRemoveDirectory(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "source")
+	target := filepath.Join(directory, "target")
+	if err := os.WriteFile(source, []byte("source"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := linkConfig(source, target, true); err == nil {
+		t.Fatal("linkConfig removed a directory target")
+	}
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Fatalf("target directory was changed: info=%v error=%v", info, err)
 	}
 }
 

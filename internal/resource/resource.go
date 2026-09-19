@@ -526,6 +526,9 @@ func configPaths(mapping string, options Options) (string, string, error) {
 	}
 	target := strings.ReplaceAll(parts[1], "$HOME", home)
 	target = strings.ReplaceAll(target, "$XDG_CONFIG_HOME", configHome)
+	if !filepath.IsAbs(target) {
+		return "", "", fmt.Errorf("config target must be absolute: %s", parts[1])
+	}
 	root, err := filepath.Abs(options.RootPath)
 	if err != nil {
 		return "", "", fmt.Errorf("resolve resource root: %w", err)
@@ -564,7 +567,14 @@ func linkConfig(source, target string, replace bool) error {
 		if !replace {
 			return fmt.Errorf("%w: %s", errConfigConflict, target)
 		}
-		if err := os.RemoveAll(target); err != nil {
+		info, infoErr := os.Lstat(target)
+		if infoErr != nil {
+			return fmt.Errorf("inspect config target %s: %w", target, infoErr)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("%w: target is a directory: %s", errConfigConflict, target)
+		}
+		if err := os.Remove(target); err != nil {
 			return fmt.Errorf("replace config target %s: %w", target, err)
 		}
 	} else if !os.IsNotExist(err) {
