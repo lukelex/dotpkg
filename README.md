@@ -101,6 +101,19 @@ go test ./...
 go run ./cmd/dotpkg --help
 ```
 
+Develop inside Docker with Docker Compose:
+
+```sh
+docker compose up -d dev
+docker compose exec dev go test ./...
+docker compose exec dev go vet ./...
+docker compose exec dev bash
+docker compose down
+```
+
+The source tree is mounted at `/workspace`; Go module and build caches use
+named volumes so they survive container recreation.
+
 Release builds use `CGO_ENABLED=0` and include checksums. Run the test suite
 and static analysis before submitting changes:
 

@@ -1,0 +1,18 @@
+services:
+  dev:
+    image: golang:1.24-bookworm
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    environment:
+      CGO_ENABLED: "0"
+      GOTOOLCHAIN: local
+    volumes:
+      - .:/workspace
+      - go-mod-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    command: sleep infinity
+
+volumes:
+  go-mod-cache:
+  go-build-cache:
