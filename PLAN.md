@@ -153,14 +153,14 @@ Create fixtures representing:
 
 Once parity is established, add a dotfiles-side compatibility wrapper that:
 
-- [ ] locates the pinned `dotpkg` binary
-- [ ] passes the existing manifest and state paths explicitly
-- [ ] translates existing profile/host flags
-- [ ] invokes `dotpkg sync` for the package stage only
-- [ ] leaves groups, configs, and services in Bash
+- [x] locates the pinned `dotpkg` binary
+- [x] passes the existing manifest and state paths explicitly
+- [x] translates existing profile/host flags
+- [x] invokes `dotpkg sync` for the package stage only
+- [x] leaves groups, configs, and services in Bash
 
-- [ ] Keep the wrapper opt-in initially, for example through an environment
-variable or an explicit installer flag. Do not silently switch the default.
+- [x] Keep the wrapper opt-in initially, for example through an environment
+  variable or an explicit installer flag. Do not silently switch the default.
 
 ### 5. Migrate resource stages or formalize the boundary
 
@@ -177,10 +177,10 @@ stable release:
 
 - [x] add checksums and release verification documentation
 - [ ] consider GitHub artifact attestations or signed releases
-- [ ] publish an explicitly experimental prerelease first
+- [x] publish an explicitly experimental prerelease first
 - [x] document that “universal Linux” means libc-independent per-architecture
   binaries; one ELF cannot run on both x86-64 and ARM64
-- [ ] pin the release version from dotfiles rather than downloading `latest`
+- [x] pin the release version from dotfiles rather than downloading `latest`
 
 The binary still requires host tools such as `pacman`, `yay`, `sudo`, and
 possibly `systemd`; only the `dotpkg` executable is self-contained.
@@ -216,9 +216,9 @@ be modified during these checks.
 
 Before changing the dotfiles repository, verify all of the following:
 
-1. [ ] `dotpkg` tests and CI pass.
-2. [ ] Package names and origins match the Bash implementation.
-3. [ ] State migration and ownership/removal behavior match.
-4. [ ] A dry-run comparison shows equivalent changes.
-5. [ ] The integration is opt-in and reversible.
-6. [ ] The Bash implementation remains available as the fallback.
+1. [x] `dotpkg` tests and CI pass.
+2. [x] Package names and origins match the Bash implementation.
+3. [x] State migration and ownership/removal behavior match.
+4. [x] A dry-run comparison shows equivalent changes.
+5. [x] The integration is opt-in and reversible.
+6. [x] The Bash implementation remains available as the fallback.
