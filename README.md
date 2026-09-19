@@ -24,9 +24,8 @@ larger system provisioning workflows.
 
 The default integration owns package reconciliation only. Groups, configuration
 links, and services are also implemented as separately tested resource stages.
-The dotfiles adapter delegates all of them when its standalone package stage is
-enabled; `DOTPKG_RESOURCES=0` retains package-only delegation. The existing
-Bash installer remains the default fallback.
+The dotfiles adapter delegates all of them by default; package-only operation
+is available through `sync --packages-only` and `package sync`.
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for CLI usage, development commands,
 Docker workflows, integration instructions, and release details.

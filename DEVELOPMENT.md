@@ -61,17 +61,16 @@ dotpkg sync --manifest packages.yaml --profile desktop --yes
 ## Dotfiles integration
 
 The dotfiles repository uses the pinned standalone package and resource stages
-by default. To invoke them explicitly or document the intended mode:
+by default. To invoke them explicitly:
 
 ```sh
-DOTPKG_PACKAGE_STAGE=1 ./linux/install/sync --desktop
+./linux/install/sync --desktop
 ```
 
 The adapter downloads and checksum-verifies the pinned release into an ignored
 cache, then invokes `dotpkg sync` with the existing manifest and shared state
-paths. A normal opt-in sync delegates groups, configuration links, and
-services too; set `DOTPKG_RESOURCES=0` to retain package-only delegation.
-`--packages-only` always stops after the package stage.
+paths. A normal sync delegates groups, configuration links, and services too.
+`--packages-only` stops after the package stage.
 
 The integration is pinned to a release rather than downloading `latest`. See
 [RELEASE.md](RELEASE.md) for asset verification details.

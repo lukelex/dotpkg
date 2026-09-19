@@ -58,18 +58,18 @@ repositories/releases.
 
 ## Important boundary
 
-The default extraction replaces package reconciliation first. The dotfiles
-`sync` command also handles resources, which are now available through
-separately tested opt-in dotpkg stages:
+The extraction now replaces the package and resource stages of dotfiles
+`sync` with separately tested dotpkg stages:
 
 - Unix group membership
 - config symlinks
 - system and user services
-- desktop resource setup and other system configuration remain Bash-owned
+- desktop resource setup and other system configuration remain outside this
+  package/resource extraction
 
-The Bash implementation remains the default fallback. Enabling the standalone
-package stage now enables the full resource mode; `DOTPKG_RESOURCES=0` is the
-explicit rollback to package-only delegation.
+The standalone implementation is now the default for package and resource
+reconciliation. Package-only operation remains available through the explicit
+`--packages-only` command path.
 
 ## Current compatibility contract
 
@@ -153,27 +153,23 @@ Create fixtures representing:
 - [x] Compare the standalone package lists against the Bash/yq implementation until
   the lists, origins, state transitions, and planned changes match.
 
-### 4. Define the integration adapter
+### 4. Integrate the standalone commands
 
-Once parity is established, add a dotfiles-side compatibility wrapper that:
+The dotfiles entrypoints now invoke the pinned executable directly:
 
 - [x] locates the pinned `dotpkg` binary
 - [x] passes the existing manifest and state paths explicitly
 - [x] translates existing profile/host flags
-- [x] invokes `dotpkg sync` for the package stage only
-- [x] leaves groups, configs, and services in Bash in package-only mode
-
-- [x] Keep the wrapper opt-in initially, for example through an environment
-  variable or an explicit installer flag. Do not silently switch the default.
-- [x] Support full resource sync with an explicit package-stage opt-in and a
-  `DOTPKG_RESOURCES=0` rollback.
+- [x] invokes `dotpkg sync` for full package and resource reconciliation
+- [x] invokes `dotpkg add` for package declaration and installation
+- [x] invokes `dotpkg validate` for package validation
+- [x] retains an explicit `--packages-only` path
 
 ### 5. Migrate resource stages or formalize the boundary
 
 - [x] Add separate resource modules and tests for groups, config links, and
   services rather than coupling them directly to package installation.
-- [x] Add an explicit dotfiles full-resource mode that delegates these stages
-  without changing the default Bash path.
+- [x] Make the dotfiles full-resource sync the default.
 
 - [x] Do not switch the default full sync until these stages have parity.
 
