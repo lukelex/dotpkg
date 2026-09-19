@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
@@ -204,7 +208,10 @@ func add(ctx context.Context, args []string, system backend.Backend) error {
 	}
 	selectedScope := *scope
 	if selectedScope == "" {
-		selectedScope = options.Profile
+		selectedScope, err = chooseScope(options, packageName)
+		if err != nil {
+			return err
+		}
 	}
 	path, err := scopePath(m, options.Profile, selectedScope)
 	if err != nil {
@@ -229,7 +236,7 @@ func add(ctx context.Context, args []string, system backend.Backend) error {
 		return fmt.Errorf("package is not available: %s", packageName)
 	}
 	if options.DryRun {
-		fmt.Printf("dry-run: add %s to %s in %s\n", packageName, selectedScope, options.ManifestPath)
+		fmt.Fprintf(options.Output, "dry-run: add %s to %s in %s\n", packageName, selectedScope, options.ManifestPath)
 		return nil
 	}
 	target := options.ManifestPath
@@ -241,6 +248,29 @@ func add(ctx context.Context, args []string, system backend.Backend) error {
 	}
 	_ = s
 	return reconcile.Sync(ctx, options, system)
+}
+
+func chooseScope(options reconcile.Options, packageName string) (string, error) {
+	if options.DryRun {
+		fmt.Fprintf(options.Output, "dry-run: default package scope is %s\n", options.Profile)
+		return options.Profile, nil
+	}
+
+	if options.Profile == "desktop" {
+		fmt.Fprintln(options.Output, "Available scopes: desktop, hyprland, i3, extras, common, option:NAME")
+	} else {
+		fmt.Fprintln(options.Output, "Available scopes: server, common")
+	}
+	fmt.Fprintf(options.Output, "Add %s to scope [%s]: ", packageName, options.Profile)
+	answer, err := bufio.NewReader(options.Input).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", err
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return options.Profile, nil
+	}
+	return answer, nil
 }
 
 func scopePath(m *manifest.Manifest, profile, scope string) (string, error) {
@@ -271,6 +301,9 @@ func scopePath(m *manifest.Manifest, profile, scope string) (string, error) {
 				return "", fmt.Errorf("optional scopes require --profile desktop")
 			}
 			option := scope[len("option:"):]
+			if !regexp.MustCompile(`^[A-Za-z0-9_-]+$`).MatchString(option) {
+				return "", fmt.Errorf("invalid option scope: %s", scope)
+			}
 			if m.Value("profiles.desktop.options."+option+".packages") == nil {
 				return "", fmt.Errorf("unknown optional scope: %s", scope)
 			}
