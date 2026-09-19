@@ -18,6 +18,37 @@ type fakeBackend struct {
 	remove    []string
 }
 
+func TestWithLockRejectsConcurrentOperation(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	options := Options{StatePath: statePath, Profile: "desktop"}
+
+	err := WithLock(options, func(_ Options) error {
+		return WithLock(options, func(_ Options) error {
+			return nil
+		})
+	})
+	if err == nil || !strings.Contains(err.Error(), "state is locked") {
+		t.Fatalf("nested lock error = %v", err)
+	}
+}
+
+func TestWithLockSkipsLockForDryRun(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	options := Options{StatePath: statePath, Profile: "desktop", DryRun: true}
+
+	if err := WithLock(options, func(normalized Options) error {
+		if !normalized.DryRun {
+			t.Fatal("dry-run flag was lost")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(statePath + ".lock"); !os.IsNotExist(err) {
+		t.Fatalf("lock file stat error = %v", err)
+	}
+}
+
 func (f *fakeBackend) IsInstalled(_ context.Context, name string) (bool, error) {
 	return f.installed[name], nil
 }

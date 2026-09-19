@@ -261,6 +261,23 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, profil
 }
 
 func Sync(ctx context.Context, options Options, system backend.Backend) error {
+	return WithLock(options, func(normalized Options) error {
+		return syncLocked(ctx, normalized, system)
+	})
+}
+
+// SyncLocked reconciles packages without acquiring a lock. Callers that need
+// to update a manifest and then reconcile it as one transaction should invoke
+// it from a WithLock callback.
+func SyncLocked(ctx context.Context, options Options, system backend.Backend) error {
+	normalized, err := options.normalize()
+	if err != nil {
+		return err
+	}
+	return syncLocked(ctx, normalized, system)
+}
+
+func syncLocked(ctx context.Context, options Options, system backend.Backend) error {
 	m, s, options, err := Load(options)
 	if err != nil {
 		return err

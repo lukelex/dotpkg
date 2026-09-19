@@ -199,14 +199,20 @@ func add(ctx context.Context, args []string, system backend.Backend) error {
 	if !regexp.MustCompile(`^[A-Za-z0-9@._+:-]+$`).MatchString(packageName) {
 		return fmt.Errorf("invalid package name: %s", packageName)
 	}
-	m, s, options, err := reconcile.Load(common.options())
+	return reconcile.WithLock(common.options(), func(options reconcile.Options) error {
+		return addLocked(ctx, packageName, *scope, options, system)
+	})
+}
+
+func addLocked(ctx context.Context, packageName, requestedScope string, options reconcile.Options, system backend.Backend) error {
+	m, s, options, err := reconcile.Load(options)
 	if err != nil {
 		return err
 	}
 	if m.HasPackage(packageName) {
 		return fmt.Errorf("package is already declared: %s", packageName)
 	}
-	selectedScope := *scope
+	selectedScope := requestedScope
 	if selectedScope == "" {
 		selectedScope, err = chooseScope(options, packageName)
 		if err != nil {
@@ -247,7 +253,7 @@ func add(ctx context.Context, args []string, system backend.Backend) error {
 		return err
 	}
 	_ = s
-	return reconcile.Sync(ctx, options, system)
+	return reconcile.SyncLocked(ctx, options, system)
 }
 
 func chooseScope(options reconcile.Options, packageName string) (string, error) {
