@@ -82,6 +82,9 @@ type commonFlags struct {
 	dryRun   bool
 	yes      bool
 	help     bool
+	desktop  bool
+	server   bool
+	check    bool
 }
 
 func (f *commonFlags) register(set *flag.FlagSet) {
@@ -90,18 +93,28 @@ func (f *commonFlags) register(set *flag.FlagSet) {
 	set.StringVar(&f.state, "state-file", "", "state file")
 	set.StringVar(&f.profile, "profile", "desktop", "profile")
 	set.BoolVar(&f.dryRun, "dry-run", false, "do not apply changes")
+	set.BoolVar(&f.check, "check", false, "alias for --dry-run")
 	set.BoolVar(&f.yes, "yes", false, "skip confirmations")
+	set.BoolVar(&f.desktop, "desktop", false, "use the desktop profile")
+	set.BoolVar(&f.server, "server", false, "use the server profile")
 	set.BoolVar(&f.help, "help", false, "show help")
 	set.BoolVar(&f.help, "h", false, "show help")
 }
 
 func (f commonFlags) options() reconcile.Options {
+	profile := f.profile
+	if f.desktop {
+		profile = "desktop"
+	}
+	if f.server {
+		profile = "server"
+	}
 	return reconcile.Options{
 		ManifestPath: f.manifest,
 		HostPath:     f.host,
 		StatePath:    f.state,
-		Profile:      f.profile,
-		DryRun:       f.dryRun,
+		Profile:      profile,
+		DryRun:       f.dryRun || f.check,
 		Yes:          f.yes,
 	}
 }

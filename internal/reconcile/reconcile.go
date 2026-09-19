@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -18,6 +19,7 @@ import (
 type Options struct {
 	ManifestPath string
 	HostPath     string
+	HostLabel    string
 	StatePath    string
 	Profile      string
 	DryRun       bool
@@ -63,6 +65,23 @@ func (o Options) normalize() (Options, error) {
 	}
 	if o.Output == nil {
 		o.Output = os.Stdout
+	}
+	if o.HostPath != "" {
+		if _, err := os.Stat(o.HostPath); os.IsNotExist(err) {
+			candidate := o.HostPath
+			if filepath.IsAbs(o.ManifestPath) {
+				candidate = filepath.Join(filepath.Dir(o.ManifestPath), "hosts", o.HostPath+".yaml")
+			} else {
+				candidate = filepath.Join(filepath.Dir(o.ManifestPath), "hosts", o.HostPath+".yaml")
+			}
+			if _, candidateErr := os.Stat(candidate); candidateErr == nil {
+				o.HostLabel = o.HostPath
+				o.HostPath = candidate
+			}
+		}
+		if o.HostLabel == "" {
+			o.HostLabel = o.HostPath
+		}
 	}
 	return o, nil
 }
@@ -299,7 +318,11 @@ func Sync(ctx context.Context, options Options, system backend.Backend) error {
 
 func setCurrentState(s *state.State, m *manifest.Manifest, options Options) {
 	s.Set(options.Profile, "current", "profile")
-	s.Set(options.HostPath, "current", "host")
+	host := options.HostLabel
+	if host == "" {
+		host = options.HostPath
+	}
+	s.Set(host, "current", "host")
 	s.Set(m.Digest(), "current", "manifest_sha256")
 }
 
