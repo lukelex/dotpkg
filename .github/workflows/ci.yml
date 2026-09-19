@@ -18,6 +18,18 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24.x"
+      - name: Check Go formatting
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Check shell syntax
+        run: |
+          set -Eeuo pipefail
+          for script in integration/*; do
+            case "$script" in
+              *.sh|dotfiles-package-stage) bash -n "$script" ;;
+            esac
+          done
+      - name: Check whitespace
+        run: git diff --check
       - run: go test ./...
       - run: go vet ./...
 
