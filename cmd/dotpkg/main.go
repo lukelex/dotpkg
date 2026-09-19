@@ -75,20 +75,26 @@ Common options:
   --profile NAME     desktop or server (default: desktop)
   --dry-run          Print changes without applying them
   --yes              Skip confirmation prompts
+  --resources        Also reconcile groups, config links, and services
+  --root PATH        Dotfiles root for resource paths
+  --replace          Replace conflicting config targets
   --help             Show this help`)
 }
 
 type commonFlags struct {
-	manifest string
-	host     string
-	state    string
-	profile  string
-	dryRun   bool
-	yes      bool
-	help     bool
-	desktop  bool
-	server   bool
-	check    bool
+	manifest  string
+	host      string
+	state     string
+	profile   string
+	dryRun    bool
+	yes       bool
+	resources bool
+	root      string
+	replace   bool
+	help      bool
+	desktop   bool
+	server    bool
+	check     bool
 }
 
 func (f *commonFlags) register(set *flag.FlagSet) {
@@ -99,6 +105,9 @@ func (f *commonFlags) register(set *flag.FlagSet) {
 	set.BoolVar(&f.dryRun, "dry-run", false, "do not apply changes")
 	set.BoolVar(&f.check, "check", false, "alias for --dry-run")
 	set.BoolVar(&f.yes, "yes", false, "skip confirmations")
+	set.BoolVar(&f.resources, "resources", false, "reconcile groups, configs, and services")
+	set.StringVar(&f.root, "root", "", "dotfiles root for resources")
+	set.BoolVar(&f.replace, "replace", false, "replace conflicting config targets")
 	set.BoolVar(&f.desktop, "desktop", false, "use the desktop profile")
 	set.BoolVar(&f.server, "server", false, "use the server profile")
 	set.BoolVar(&f.help, "help", false, "show help")
@@ -120,6 +129,9 @@ func (f commonFlags) options() reconcile.Options {
 		Profile:      profile,
 		DryRun:       f.dryRun || f.check,
 		Yes:          f.yes,
+		Resources:    f.resources,
+		RootPath:     f.root,
+		Replace:      f.replace,
 	}
 }
 

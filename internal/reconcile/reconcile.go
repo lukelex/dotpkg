@@ -13,19 +13,24 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
+	"github.com/lukelex/dotpkg/internal/resource"
 	"github.com/lukelex/dotpkg/internal/state"
 )
 
 type Options struct {
-	ManifestPath string
-	HostPath     string
-	HostLabel    string
-	StatePath    string
-	Profile      string
-	DryRun       bool
-	Yes          bool
-	Input        io.Reader
-	Output       io.Writer
+	ManifestPath   string
+	HostPath       string
+	HostLabel      string
+	StatePath      string
+	Profile        string
+	DryRun         bool
+	Yes            bool
+	Resources      bool
+	RootPath       string
+	Replace        bool
+	ResourceSystem resource.System
+	Input          io.Reader
+	Output         io.Writer
 }
 
 type Plan struct {
@@ -305,10 +310,12 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	printPlan(options.Output, plan)
 	if plan.Changes() == 0 {
 		fmt.Fprintln(options.Output, "packages: already synchronized")
-		return nil
+		if !options.Resources {
+			return nil
+		}
 	}
 	if options.DryRun {
-		return nil
+		return syncResources(ctx, m, s, options, system)
 	}
 	apply := options.Yes
 	if !options.Yes {
@@ -318,7 +325,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		}
 	}
 	if !apply {
-		return nil
+		return syncResources(ctx, m, s, options, system)
 	}
 	repository, aur, err := splitByOrigin(m, plan.Missing)
 	if err != nil {
@@ -336,7 +343,39 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	tracked = append(tracked, plan.Missing...)
 	s.SetPackages(tracked)
 	setCurrentState(s, m, options)
-	return s.Write()
+	if err := s.Write(); err != nil {
+		return err
+	}
+	return syncResources(ctx, m, s, options, system)
+}
+
+func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system backend.Backend) error {
+	if !options.Resources {
+		return nil
+	}
+	resourceSystem := options.ResourceSystem
+	if resourceSystem == nil {
+		var ok bool
+		resourceSystem, ok = system.(resource.System)
+		if !ok {
+			return fmt.Errorf("backend does not support resource reconciliation")
+		}
+	}
+	if !options.DryRun {
+		setCurrentState(s, m, options)
+		if err := s.Write(); err != nil {
+			return err
+		}
+	}
+	return resource.Sync(ctx, m, s, resource.Options{
+		Profile:  options.Profile,
+		RootPath: options.RootPath,
+		DryRun:   options.DryRun,
+		Yes:      options.Yes,
+		Replace:  options.Replace,
+		Input:    options.Input,
+		Output:   options.Output,
+	}, resourceSystem)
 }
 
 func setCurrentState(s *state.State, m *manifest.Manifest, options Options) {
