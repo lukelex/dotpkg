@@ -72,7 +72,7 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, option
 	if err != nil {
 		return Plan{}, err
 	}
-	services, err := planServices(ctx, m, s, options, system)
+	services, err := planServices(ctx, m, s, options, system, true)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -95,7 +95,7 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		reader = bufio.NewReader(options.Input)
 	}
 	options.Input = reader
-	for _, stage := range []struct {
+	stages := []struct {
 		name  string
 		plan  StagePlan
 		apply func(StagePlan) error
@@ -104,10 +104,15 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		{name: "groups", plan: plan.Groups, apply: func(p StagePlan) error { return applyGroups(ctx, p, options, system) }, path: []string{"managed", "groups"}},
 		{name: "configs", plan: plan.Configs, apply: func(p StagePlan) error { return applyConfigs(p, options) }, path: []string{"managed", "configs"}},
 		{name: "services", plan: plan.Services, apply: func(p StagePlan) error { return applyServices(ctx, p, options, system) }, path: []string{"managed", "services"}},
-	} {
+	}
+	for index := range stages {
+		stage := &stages[index]
 		if stage.plan.Changes() == 0 {
 			if stage.name == "configs" && !options.DryRun {
 				if err := reloadForDeclaredConfigs(ctx, plan.Configs.Declared, options, system); err != nil {
+					return err
+				}
+				if err := refreshServicePlan(ctx, stages, m, s, options, system); err != nil {
 					return err
 				}
 			}
@@ -119,6 +124,11 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 				return err
 			}
 			if !apply {
+				if stage.name == "configs" {
+					if err := refreshServicePlan(ctx, stages, m, s, options, system); err != nil {
+						return err
+					}
+				}
 				continue
 			}
 		}
@@ -134,10 +144,27 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 			if err := reloadForDeclaredConfigs(ctx, plan.Configs.Declared, options, system); err != nil {
 				return err
 			}
+			if err := refreshServicePlan(ctx, stages, m, s, options, system); err != nil {
+				return err
+			}
 		}
 		s.SetItems(items, stage.path...)
 	}
 	return s.Write()
+}
+
+func refreshServicePlan(ctx context.Context, stages []struct {
+	name  string
+	plan  StagePlan
+	apply func(StagePlan) error
+	path  []string
+}, m *manifest.Manifest, s *state.State, options Options, system System) error {
+	services, err := planServices(ctx, m, s, options, system, false)
+	if err != nil {
+		return err
+	}
+	stages[2].plan = services
+	return nil
 }
 
 func reloadForDeclaredConfigs(ctx context.Context, declared []string, options Options, system System) error {
@@ -312,7 +339,7 @@ func planConfigs(m *manifest.Manifest, s *state.State, options Options) (StagePl
 	return sortPlan(planned), nil
 }
 
-func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (StagePlan, error) {
+func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System, allowMissingConfigLinks bool) (StagePlan, error) {
 	declared := declaredServices(m, s, options.Profile)
 	configs := declaredMetadata(m, s, options.Profile, "configs")
 	planned := StagePlan{Declared: declared}
@@ -323,7 +350,7 @@ func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, opt
 		if err != nil {
 			return StagePlan{}, err
 		}
-		if !exists && configProvidesService(configs, service, options) {
+		if !exists && configProvidesService(configs, service, options, allowMissingConfigLinks) {
 			exists = true
 		}
 		if !exists {
@@ -345,7 +372,7 @@ func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, opt
 	return sortPlan(planned), nil
 }
 
-func configProvidesService(configs []string, service string, options Options) bool {
+func configProvidesService(configs []string, service string, options Options, allowMissingConfigLinks bool) bool {
 	userService := strings.HasPrefix(service, "user:")
 	name := strings.TrimPrefix(service, "user:")
 	suffix := "/systemd/system/" + name
@@ -357,7 +384,14 @@ func configProvidesService(configs []string, service string, options Options) bo
 		if err != nil || !strings.HasSuffix(filepath.ToSlash(target), suffix) {
 			continue
 		}
-		if _, err := os.Stat(source); err == nil {
+		if _, err := os.Stat(source); err != nil {
+			continue
+		}
+		if allowMissingConfigLinks {
+			return true
+		}
+		matches, err := configMatches(target, source)
+		if err == nil && matches {
 			return true
 		}
 	}
