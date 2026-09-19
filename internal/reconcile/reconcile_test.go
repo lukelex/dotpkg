@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -46,6 +47,118 @@ func TestWithLockSkipsLockForDryRun(t *testing.T) {
 	}
 	if _, err := os.Stat(statePath + ".lock"); !os.IsNotExist(err) {
 		t.Fatalf("lock file stat error = %v", err)
+	}
+}
+
+func TestLoadResolvesNamedHostAndPreservesSharedState(t *testing.T) {
+	directory := t.TempDir()
+	manifestPath := filepath.Join(directory, "packages.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`source: repo
+common:
+  packages:
+    headless:
+      git: {}
+profiles:
+  desktop:
+    packages:
+      desktop:
+        base: {}
+      extras: {}
+      hyprland: {}
+      i3: {}
+    options: {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(directory, "hosts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "hosts", "laptop.yaml"), []byte(`profiles:
+  desktop:
+    packages:
+      desktop:
+        host-tool: {}
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(directory, "state.yaml")
+	if err := os.WriteFile(statePath, []byte(`version: 1
+current:
+  selections:
+    extras: false
+    hyprland: false
+    i3: false
+managed:
+  packages: []
+  groups:
+    - docker
+  configs:
+    - source:target
+  services:
+    - sshd
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m, s, options, err := Load(Options{
+		ManifestPath: manifestPath,
+		HostPath:     "laptop",
+		StatePath:    statePath,
+		Profile:      "desktop",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.HostPath != filepath.Join(directory, "hosts", "laptop.yaml") {
+		t.Fatalf("host path = %q", options.HostPath)
+	}
+	if options.HostLabel != "laptop" {
+		t.Fatalf("host label = %q", options.HostLabel)
+	}
+	if got := strings.Join(DeclaredPackages(m, PackageCategories(m, "desktop", true, s)), ","); got != "base,git,host-tool" {
+		t.Fatalf("declared packages = %q", got)
+	}
+	if groups, ok := s.Get("managed", "groups"); !ok || !reflect.DeepEqual(groups, []any{"docker"}) {
+		t.Fatalf("managed groups = %#v", groups)
+	}
+}
+
+func TestLoadRejectsUnknownHostOverlay(t *testing.T) {
+	directory := t.TempDir()
+	manifestPath := filepath.Join(directory, "packages.yaml")
+	if err := os.WriteFile(manifestPath, []byte("source: repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _, err := Load(Options{ManifestPath: manifestPath, HostPath: "missing"})
+	if err == nil || !strings.Contains(err.Error(), "unknown host overlay: missing") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestSyncAdoptsInstalledPackagesOnFirstRun(t *testing.T) {
+	manifestPath := testManifest(t)
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	fake := &fakeBackend{installed: map[string]bool{
+		"git": true,
+		"bat": true,
+	}}
+	if err := Sync(context.Background(), Options{
+		ManifestPath: manifestPath,
+		StatePath:    statePath,
+		Profile:      "desktop",
+		Yes:          true,
+	}, fake); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := state.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(loaded.Packages(), ","); got != "bat,git" {
+		t.Fatalf("adopted packages = %q", got)
+	}
+	if len(fake.install) != 0 {
+		t.Fatalf("installed already-present packages = %#v", fake.install)
 	}
 }
 

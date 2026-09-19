@@ -67,20 +67,18 @@ func (o Options) normalize() (Options, error) {
 		o.Output = os.Stdout
 	}
 	if o.HostPath != "" {
-		if _, err := os.Stat(o.HostPath); os.IsNotExist(err) {
-			candidate := o.HostPath
-			if filepath.IsAbs(o.ManifestPath) {
-				candidate = filepath.Join(filepath.Dir(o.ManifestPath), "hosts", o.HostPath+".yaml")
-			} else {
-				candidate = filepath.Join(filepath.Dir(o.ManifestPath), "hosts", o.HostPath+".yaml")
+		requestedHost := o.HostPath
+		if _, err := os.Stat(o.HostPath); err == nil {
+			if o.HostLabel == "" {
+				o.HostLabel = requestedHost
 			}
-			if _, candidateErr := os.Stat(candidate); candidateErr == nil {
-				o.HostLabel = o.HostPath
-				o.HostPath = candidate
+		} else {
+			candidate := filepath.Join(filepath.Dir(o.ManifestPath), "hosts", requestedHost+".yaml")
+			if _, candidateErr := os.Stat(candidate); candidateErr != nil {
+				return o, fmt.Errorf("unknown host overlay: %s", requestedHost)
 			}
-		}
-		if o.HostLabel == "" {
-			o.HostLabel = o.HostPath
+			o.HostLabel = requestedHost
+			o.HostPath = candidate
 		}
 	}
 	return o, nil
