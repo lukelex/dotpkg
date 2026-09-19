@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -18,7 +19,18 @@ type State struct {
 func Load(path string) (*State, error) {
 	contents, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return &State{Path: path, Data: map[string]any{}}, nil
+		data := defaultData()
+		legacyPath := filepath.Join(filepath.Dir(path), "packages")
+		if legacy, legacyErr := os.ReadFile(legacyPath); legacyErr == nil {
+			packages := []any{}
+			for _, line := range strings.Split(string(legacy), "\n") {
+				if packageName := strings.TrimSpace(line); packageName != "" {
+					packages = append(packages, packageName)
+				}
+			}
+			data["managed"].(map[string]any)["packages"] = packages
+		}
+		return &State{Path: path, Data: data}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read state %s: %w", path, err)
@@ -31,6 +43,19 @@ func Load(path string) (*State, error) {
 		data = map[string]any{}
 	}
 	return &State{Path: path, Exists: true, Data: data}, nil
+}
+
+func defaultData() map[string]any {
+	return map[string]any{
+		"version": 1,
+		"current": map[string]any{},
+		"managed": map[string]any{
+			"packages": []any{},
+			"groups":   []any{},
+			"configs":  []any{},
+			"services": []any{},
+		},
+	}
 }
 
 func (s *State) Get(path ...string) (any, bool) {

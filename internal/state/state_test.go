@@ -1,7 +1,9 @@
 package state
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -26,5 +28,19 @@ func TestStatePreservesSelectionsAndManagedPackages(t *testing.T) {
 	packages := loaded.Packages()
 	if len(packages) != 2 || packages[0] != "git" || packages[1] != "zsh" {
 		t.Fatalf("packages = %#v", packages)
+	}
+}
+
+func TestStateLoadsLegacyPackageList(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.WriteFile(filepath.Join(directory, "packages"), []byte("git\n\nbat\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Load(filepath.Join(directory, "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(s.Packages(), ","); got != "bat,git" {
+		t.Fatalf("legacy packages = %q", got)
 	}
 }
