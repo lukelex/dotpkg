@@ -10,3 +10,5 @@ and overlay combinations used by the package stage:
   that package reconciliation must preserve.
 - `selected-state.yaml` — all desktop selections enabled.
 - `unselected-state.yaml` — all optional desktop selections disabled.
+- `expected-*.txt` — package lists generated from the Bash/yq category
+  expressions for desktop and server comparison tests.

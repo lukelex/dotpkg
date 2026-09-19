@@ -38,6 +38,15 @@ func TestCompatibilityFixturesCoverSelectionSets(t *testing.T) {
 				t.Fatal(err)
 			}
 			packages := DeclaredPackages(m, PackageCategories(m, "desktop", true, s))
+			want := readFixtureList(t, "expected-desktop-"+test.name+".txt")
+			if !reflect.DeepEqual(packages, want) {
+				for index := range packages {
+					if packages[index] != want[index] {
+						t.Fatalf("package list differs at %d: got %q, want %q", index, packages[index], want[index])
+					}
+				}
+				t.Fatalf("package list differs from Bash fixture: got %d entries, want %d", len(packages), len(want))
+			}
 			if len(packages) != test.wantPackages {
 				t.Fatalf("package count = %d, want %d", len(packages), test.wantPackages)
 			}
@@ -49,6 +58,28 @@ func TestCompatibilityFixturesCoverSelectionSets(t *testing.T) {
 			}
 		})
 	}
+
+	server := DeclaredPackages(m, PackageCategories(m, "server", true, nil))
+	if want := readFixtureList(t, "expected-server.txt"); !reflect.DeepEqual(server, want) {
+		t.Fatalf("server package list differs from Bash fixture")
+	}
+	for _, packageName := range readFixtureList(t, "expected-desktop-selected.txt") {
+		if got := m.PackageOrigin(packageName); got != "aur" {
+			t.Fatalf("package %s origin = %q, want aur", packageName, got)
+		}
+	}
+}
+
+func readFixtureList(t *testing.T, name string) []string {
+	t.Helper()
+	contents, err := os.ReadFile(fixturePath(name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(contents)) == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSpace(string(contents)), "\n")
 }
 
 func TestCompatibilityFixtureHostOverlayAddsPackage(t *testing.T) {

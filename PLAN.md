@@ -146,8 +146,8 @@ Create fixtures representing:
 - [x] a current shared state file
 - [x] selected and unselected desktop options
 
-- [ ] Compare the standalone package lists against the Bash/yq implementation until
-the lists, origins, state transitions, and planned changes match.
+- [x] Compare the standalone package lists against the Bash/yq implementation until
+  the lists, origins, state transitions, and planned changes match.
 
 ### 4. Define the integration adapter
 
