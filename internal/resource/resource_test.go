@@ -338,6 +338,34 @@ func TestSyncSkipsConfigConflictWithoutTrackingIt(t *testing.T) {
 	}
 }
 
+func TestConfigAdoptionMatchesBashStateBoundary(t *testing.T) {
+	m, s, options, system := resourceFixture(t)
+	target := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "docker")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(options.RootPath, "config/docker"), target); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := BuildPlan(context.Background(), m, s, options, system)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(plan.Configs.Adopted, []string{"config/docker:$XDG_CONFIG_HOME/docker"}) {
+		t.Fatalf("new-state config adoption = %#v", plan.Configs.Adopted)
+	}
+
+	s.Exists = true
+	plan, err = BuildPlan(context.Background(), m, s, options, system)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Configs.Adopted) != 0 {
+		t.Fatalf("existing-state config adoption = %#v", plan.Configs.Adopted)
+	}
+}
+
 func readResourceFixture(t *testing.T, name string) []string {
 	t.Helper()
 	contents, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fixtures", name))

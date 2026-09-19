@@ -245,8 +245,10 @@ func planConfigs(m *manifest.Manifest, s *state.State, options Options) (StagePl
 			return StagePlan{}, err
 		}
 		if matches {
-			if _, tracked := trackedSet[mapping]; !tracked {
-				planned.Adopted = append(planned.Adopted, mapping)
+			if !s.Exists {
+				if _, tracked := trackedSet[mapping]; !tracked {
+					planned.Adopted = append(planned.Adopted, mapping)
+				}
 			}
 		} else {
 			planned.Missing = append(planned.Missing, mapping)
