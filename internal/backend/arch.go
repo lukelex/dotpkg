@@ -55,7 +55,7 @@ func (a *Arch) IsInstalled(ctx context.Context, packageName string) (bool, error
 	if err == nil {
 		return true, nil
 	}
-	var exitError *exec.ExitError
+	var exitError interface{ ExitCode() int }
 	if errors.As(err, &exitError) && exitError.ExitCode() == 1 {
 		return false, nil
 	}
@@ -105,6 +105,12 @@ func (a *Arch) AURPackages(ctx context.Context, names []string) (map[string]stru
 		if err != nil {
 			return nil, fmt.Errorf("AUR request failed: %w", err)
 		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			if response.Body != nil {
+				response.Body.Close()
+			}
+			return nil, fmt.Errorf("AUR returned HTTP %s", response.Status)
+		}
 		if response.Body == nil {
 			return nil, fmt.Errorf("AUR response has no body")
 		}
@@ -116,9 +122,6 @@ func (a *Arch) AURPackages(ctx context.Context, names []string) (map[string]stru
 		}
 		if closeError != nil {
 			return nil, fmt.Errorf("close AUR response: %w", closeError)
-		}
-		if response.StatusCode < 200 || response.StatusCode >= 300 {
-			return nil, fmt.Errorf("AUR returned HTTP %s", response.Status)
 		}
 		for _, packageInfo := range payload.Results {
 			result[packageInfo.Name] = struct{}{}
