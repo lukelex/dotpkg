@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">dotpkg logo</title>
+  <desc id="desc">A dot above an outlined package box</desc>
+  <g fill="none" stroke="#4f46e5" stroke-linecap="round" stroke-linejoin="round" stroke-width="7">
+    <path d="m20 52 44-24 44 24v44l-44 24-44-24z"/>
+    <path d="m20 52 44 24 44-24M64 76v44"/>
+  </g>
+  <circle cx="64" cy="12" r="8" fill="#4f46e5"/>
+</svg>

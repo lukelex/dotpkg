@@ -1,4 +1,8 @@
-# dotpkg
+<p align="center">
+  <img src="assets/dotpkg.svg" alt="dotpkg logo" width="112">
+</p>
+
+<h1 align="center">dotpkg</h1>
 
 `dotpkg` is a standalone, manifest-driven Linux package reconciler extracted
 from [lukelex/dotfiles](https://github.com/lukelex/dotfiles). Its goal is to
