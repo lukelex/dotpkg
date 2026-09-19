@@ -175,10 +175,10 @@ and tests rather than coupling them directly to package installation.
 The workflow currently builds release assets on `v*` tags. Before the first
 stable release:
 
-- [ ] add checksums and release verification documentation
+- [x] add checksums and release verification documentation
 - [ ] consider GitHub artifact attestations or signed releases
 - [ ] publish an explicitly experimental prerelease first
-- [ ] document that “universal Linux” means libc-independent per-architecture
+- [x] document that “universal Linux” means libc-independent per-architecture
   binaries; one ELF cannot run on both x86-64 and ARM64
 - [ ] pin the release version from dotfiles rather than downloading `latest`
 

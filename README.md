@@ -89,6 +89,11 @@ linux/arm64
 One ELF binary cannot run on multiple CPU architectures, so “universal Linux
 binary” means one libc-independent binary per architecture.
 
+See [RELEASE.md](RELEASE.md) for checksum verification. The optional,
+not-yet-wired dotfiles package-stage adapter is in
+`integration/dotfiles-package-stage`; it requires an explicitly pinned binary
+path and never downloads a release.
+
 ## Development
 
 ```sh

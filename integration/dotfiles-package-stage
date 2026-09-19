@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+: "${DOTPKG_BIN:?set DOTPKG_BIN to the pinned dotpkg executable}"
+: "${DOTPKG_MANIFEST:?set DOTPKG_MANIFEST to linux/packages.yaml}"
+: "${DOTPKG_STATE:?set DOTPKG_STATE to the shared dotfiles state file}"
+
+if [ ! -x "$DOTPKG_BIN" ]; then
+	printf 'dotpkg adapter: executable not found: %s\n' "$DOTPKG_BIN" >&2
+	exit 2
+fi
+
+profile="${DOTPKG_PROFILE:-desktop}"
+case "$profile" in
+	desktop|server) ;;
+	*)
+		printf 'dotpkg adapter: unknown profile: %s\n' "$profile" >&2
+		exit 2
+		;;
+esac
+
+args=(
+	sync
+	--manifest "$DOTPKG_MANIFEST"
+	--state-file "$DOTPKG_STATE"
+	--profile "$profile"
+)
+
+if [ -n "${DOTPKG_HOST:-}" ]; then
+	args+=(--host "$DOTPKG_HOST")
+fi
+if [ "${DOTPKG_DRY_RUN:-0}" = 1 ]; then
+	args+=(--dry-run)
+fi
+if [ "${DOTPKG_YES:-0}" = 1 ]; then
+	args+=(--yes)
+fi
+
+# This wrapper owns only the package stage. The caller continues to run the
+# Bash-owned group, config, service, and other resource stages separately.
+exec "$DOTPKG_BIN" "${args[@]}"
