@@ -164,11 +164,11 @@ variable or an explicit installer flag. Do not silently switch the default.
 
 ### 5. Migrate resource stages or formalize the boundary
 
-- [ ] Decide whether groups, config links, and services belong in `dotpkg` or remain
-dotfiles-specific. If they move into `dotpkg`, add separate resource modules
-and tests rather than coupling them directly to package installation.
+- [x] Decide that groups, config links, and services remain dotfiles-specific for
+  the initial extraction. If they move into `dotpkg` later, add separate resource
+  modules and tests rather than coupling them directly to package installation.
 
-- [ ] Do not switch the eventual full sync until these stages have parity.
+- [x] Do not switch the eventual full sync until these stages have parity.
 
 ### 6. Release process
 
