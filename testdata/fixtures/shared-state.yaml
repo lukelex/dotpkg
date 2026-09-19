@@ -1,0 +1,23 @@
+version: 1
+current:
+  profile: desktop
+  host: laptop
+  manifest_sha256: fixture-digest
+  selections:
+    extras: false
+    hyprland: false
+    i3: false
+    options:
+      ipod: true
+      nvidia: false
+      nvidia-gui: false
+      optional: true
+managed:
+  packages:
+    - git
+  groups:
+    - docker
+  configs:
+    - linux/config/example:$HOME/.config/example
+  services:
+    - docker

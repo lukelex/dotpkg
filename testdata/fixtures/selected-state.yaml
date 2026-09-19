@@ -1,0 +1,19 @@
+version: 1
+current:
+  profile: desktop
+  host: ""
+  manifest_sha256: fixture-digest
+  selections:
+    extras: true
+    hyprland: true
+    i3: true
+    options:
+      ipod: true
+      nvidia: true
+      nvidia-gui: true
+      optional: true
+managed:
+  packages: []
+  groups: []
+  configs: []
+  services: []

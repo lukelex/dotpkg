@@ -1,0 +1,6 @@
+profiles:
+  desktop:
+    packages:
+      desktop:
+        host-only-tool:
+          source: repo
