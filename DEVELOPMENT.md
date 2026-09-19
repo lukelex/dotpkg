@@ -35,7 +35,7 @@ builds:
 
 ```sh
 docker build --target test .
-docker build --target runtime --build-arg VERSION=v0.1.0 -t dotpkg:dev .
+docker build --target runtime --build-arg VERSION=v0.3.0 -t dotpkg:dev .
 ```
 
 The runtime image contains only the static executable. Package reconciliation
@@ -80,7 +80,13 @@ resources:
 
 `profiles` and `selections` are optional. A resource is declared only when its
 profile matches and every listed selection is enabled. Service scopes are
-`system` or `user`; user services are tracked as `user:<name>` in state.
+`system` or `user`; user services are tracked as `user:<name>` in state. Unit
+files linked under systemd directories trigger the appropriate daemon reload,
+and system service changes run through `sudo`.
+
+Manifest fields consumed by dotpkg are structurally validated before planning.
+Unknown metadata is preserved for compatibility with the surrounding dotfiles
+manifest.
 
 ## Dotfiles integration
 
