@@ -4,6 +4,7 @@ bluetooth
 cups
 docker
 nordvpnd
+sddm
 user:bluetooth-notify.service
 user:gammastep.service
 user:night-mode-sunset.timer

@@ -268,3 +268,9 @@ profiles:
           services:
             system:
               - sshd
+resources:
+  services:
+    - name: sddm
+      scope: system
+      profiles: [desktop]
+      selections: [i3]

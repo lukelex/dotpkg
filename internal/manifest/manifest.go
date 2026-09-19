@@ -154,6 +154,135 @@ func (m *Manifest) ServiceNames(path, scope string) []string {
 	return serviceNames(m.Value(path), scope)
 }
 
+// ResourceConfigs returns explicit config links that are not attached to a
+// package. Entries may be mapping strings or objects with source, target,
+// profiles, and selections fields.
+func (m *Manifest) ResourceConfigs(profile string, selections map[string]bool) []string {
+	resources, ok := m.Data["resources"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	items, ok := resources["configs"].([]any)
+	if !ok {
+		return nil
+	}
+	var result []string
+	for _, item := range items {
+		switch value := item.(type) {
+		case string:
+			result = append(result, value)
+		case map[string]any:
+			if !resourceSelected(value, profile, selections) {
+				continue
+			}
+			source, sourceOK := value["source"].(string)
+			target, targetOK := value["target"].(string)
+			if sourceOK && targetOK && source != "" && target != "" {
+				result = append(result, source+":"+target)
+			}
+		}
+	}
+	return uniqueStrings(result)
+}
+
+// ResourceServices returns explicit services that are not attached to a
+// package. Service objects use name, scope, profiles, and selections fields.
+func (m *Manifest) ResourceServices(profile string, selections map[string]bool) []string {
+	resources, ok := m.Data["resources"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	services, ok := resources["services"]
+	if !ok {
+		return nil
+	}
+	var result []string
+	if mapping, ok := services.(map[string]any); ok {
+		for _, scope := range []string{"system", "user"} {
+			items, ok := mapping[scope].([]any)
+			if !ok {
+				continue
+			}
+			for _, item := range items {
+				if name, ok := item.(string); ok {
+					result = append(result, resourceServiceName(scope, name))
+				}
+			}
+		}
+	}
+	if items, ok := services.([]any); ok {
+		for _, item := range items {
+			mapping, ok := item.(map[string]any)
+			if !ok || !resourceSelected(mapping, profile, selections) {
+				continue
+			}
+			name, nameOK := mapping["name"].(string)
+			scope, scopeOK := mapping["scope"].(string)
+			if nameOK && scopeOK && name != "" && (scope == "system" || scope == "user") {
+				result = append(result, resourceServiceName(scope, name))
+			}
+		}
+	}
+	return uniqueStrings(result)
+}
+
+func resourceServiceName(scope, name string) string {
+	if scope == "user" {
+		return "user:" + name
+	}
+	return name
+}
+
+func resourceSelected(value map[string]any, profile string, selections map[string]bool) bool {
+	if profiles, ok := stringSlice(value["profiles"]); ok && len(profiles) > 0 && !containsString(profiles, profile) {
+		return false
+	}
+	if required, ok := stringSlice(value["selections"]); ok {
+		for _, selection := range required {
+			if !selections[selection] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func stringSlice(value any) ([]string, bool) {
+	items, ok := value.([]any)
+	if !ok {
+		return nil, false
+	}
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if value, ok := item.(string); ok {
+			result = append(result, value)
+		}
+	}
+	return result, true
+}
+
+func containsString(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func uniqueStrings(values []string) []string {
+	set := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		set[value] = struct{}{}
+	}
+	result := make([]string, 0, len(set))
+	for value := range set {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
+}
+
 func metadataStrings(value any, key string) []string {
 	var result []string
 	var walk func(any)

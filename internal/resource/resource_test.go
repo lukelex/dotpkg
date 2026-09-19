@@ -83,6 +83,17 @@ profiles:
       hyprland: {}
       i3: {}
     options: {}
+resources:
+  configs:
+    - source: config/custom
+      target: $XDG_CONFIG_HOME/custom
+      profiles: [desktop]
+      selections: [i3]
+  services:
+    - name: custom.service
+      scope: user
+      profiles: [desktop]
+      selections: [i3]
 `
 	if err := os.WriteFile(manifestPath, []byte(contents), 0o644); err != nil {
 		t.Fatal(err)
@@ -363,6 +374,36 @@ func TestConfigAdoptionMatchesBashStateBoundary(t *testing.T) {
 	}
 	if len(plan.Configs.Adopted) != 0 {
 		t.Fatalf("existing-state config adoption = %#v", plan.Configs.Adopted)
+	}
+}
+
+func TestCustomResourcesFollowProfileSelections(t *testing.T) {
+	m, s, options, system := resourceFixture(t)
+	s.Set(true, "current", "selections", "i3")
+	system.services["user:custom.service"] = true
+	system.serviceState["user:custom.service"] = false
+
+	plan, err := BuildPlan(context.Background(), m, s, options, system)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(plan.Configs.Declared, "config/custom:$XDG_CONFIG_HOME/custom") {
+		t.Fatalf("custom configs = %#v", plan.Configs.Declared)
+	}
+	if !contains(plan.Services.Declared, "user:custom.service") {
+		t.Fatalf("custom services = %#v", plan.Services.Declared)
+	}
+	if !contains(plan.Services.Missing, "user:custom.service") {
+		t.Fatalf("custom service changes = %#v", plan.Services)
+	}
+
+	s.Set(false, "current", "selections", "i3")
+	plan, err = BuildPlan(context.Background(), m, s, options, system)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contains(plan.Configs.Declared, "config/custom:$XDG_CONFIG_HOME/custom") || contains(plan.Services.Declared, "user:custom.service") {
+		t.Fatalf("unselected custom resources remained: configs=%#v services=%#v", plan.Configs.Declared, plan.Services.Declared)
 	}
 }
 

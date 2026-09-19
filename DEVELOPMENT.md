@@ -58,6 +58,30 @@ dotpkg plan --manifest packages.yaml --profile desktop
 dotpkg sync --manifest packages.yaml --profile desktop --yes
 ```
 
+## Custom resources
+
+Resource metadata may be attached to packages or declared independently. Use
+explicit resources for configuration links and services that are not owned by
+a package:
+
+```yaml
+resources:
+  configs:
+    - source: linux/config/my-tool
+      target: $XDG_CONFIG_HOME/my-tool
+      profiles: [desktop]
+      selections: [i3]
+  services:
+    - name: my-tool.service
+      scope: user
+      profiles: [desktop]
+      selections: [i3]
+```
+
+`profiles` and `selections` are optional. A resource is declared only when its
+profile matches and every listed selection is enabled. Service scopes are
+`system` or `user`; user services are tracked as `user:<name>` in state.
+
 ## Dotfiles integration
 
 The dotfiles repository uses the pinned standalone package and resource stages

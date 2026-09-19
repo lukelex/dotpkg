@@ -186,6 +186,9 @@ func declaredMetadata(m *manifest.Manifest, s *state.State, profile, key string)
 	for _, path := range categoryPaths(m, profile, s) {
 		values = append(values, m.MetadataStrings(path, key)...)
 	}
+	if key == "configs" {
+		values = append(values, m.ResourceConfigs(profile, selectionValues(m, s))...)
+	}
 	return unique(values)
 }
 
@@ -199,7 +202,21 @@ func declaredServices(m *manifest.Manifest, s *state.State, profile string) []st
 			values = append(values, "user:"+service)
 		}
 	}
+	values = append(values, m.ResourceServices(profile, selectionValues(m, s))...)
 	return unique(values)
+}
+
+func selectionValues(m *manifest.Manifest, s *state.State) map[string]bool {
+	values := make(map[string]bool)
+	for _, selection := range []string{"extras", "hyprland", "i3"} {
+		selected, recorded := s.Selection(selection)
+		values[selection] = recorded && selected
+	}
+	for _, option := range m.OptionNames() {
+		selected, recorded := s.Selection("options", option)
+		values["options."+option] = recorded && selected
+	}
+	return values
 }
 
 func planGroups(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (StagePlan, error) {

@@ -90,6 +90,9 @@ mode. Resource mode consumes only the supported groups, config, and service
 fields; other metadata remains available to the dotfiles installer. The current
 shared state shape is:
 
+Explicit custom configs and services use the manifest's `resources.configs` and
+`resources.services` lists with optional profile and selection filters.
+
 ```yaml
 version: 1
 current:
