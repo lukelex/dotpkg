@@ -146,6 +146,62 @@ func (m *Manifest) OptionPackages(option string) []string {
 	return m.PackageNames("profiles.desktop.options." + option + ".packages")
 }
 
+func (m *Manifest) MetadataStrings(path, key string) []string {
+	return metadataStrings(m.Value(path), key)
+}
+
+func (m *Manifest) ServiceNames(path, scope string) []string {
+	return serviceNames(m.Value(path), scope)
+}
+
+func metadataStrings(value any, key string) []string {
+	var result []string
+	var walk func(any)
+	walk = func(current any) {
+		mapping, ok := current.(map[string]any)
+		if !ok {
+			return
+		}
+		if values, ok := mapping[key].([]any); ok {
+			for _, value := range values {
+				if item, ok := value.(string); ok {
+					result = append(result, item)
+				}
+			}
+		}
+		for _, child := range mapping {
+			walk(child)
+		}
+	}
+	walk(value)
+	return result
+}
+
+func serviceNames(value any, scope string) []string {
+	var result []string
+	var walk func(any)
+	walk = func(current any) {
+		mapping, ok := current.(map[string]any)
+		if !ok {
+			return
+		}
+		if services, ok := mapping["services"].(map[string]any); ok {
+			if values, ok := services[scope].([]any); ok {
+				for _, value := range values {
+					if item, ok := value.(string); ok {
+						result = append(result, item)
+					}
+				}
+			}
+		}
+		for _, child := range mapping {
+			walk(child)
+		}
+	}
+	walk(value)
+	return result
+}
+
 func (m *Manifest) PackageOrigin(name string) string {
 	var sources []string
 	var walk func(any)

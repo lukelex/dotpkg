@@ -44,3 +44,14 @@ func TestStateLoadsLegacyPackageList(t *testing.T) {
 		t.Fatalf("legacy packages = %q", got)
 	}
 }
+
+func TestStateGenericManagedItems(t *testing.T) {
+	s, err := Load(filepath.Join(t.TempDir(), "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetItems([]string{"zsh", "git", "git"}, "managed", "configs")
+	if got := strings.Join(s.Items("managed", "configs"), ","); got != "git,zsh" {
+		t.Fatalf("managed configs = %q", got)
+	}
+}

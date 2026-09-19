@@ -96,7 +96,15 @@ func (s *State) Selection(path ...string) (bool, bool) {
 }
 
 func (s *State) Packages() []string {
-	value, ok := s.Get("managed", "packages")
+	return s.Items("managed", "packages")
+}
+
+func (s *State) SetPackages(packages []string) {
+	s.SetItems(packages, "managed", "packages")
+}
+
+func (s *State) Items(path ...string) []string {
+	value, ok := s.Get(path...)
 	if !ok {
 		return nil
 	}
@@ -104,31 +112,31 @@ func (s *State) Packages() []string {
 	if !ok {
 		return nil
 	}
-	packages := make([]string, 0, len(items))
+	result := make([]string, 0, len(items))
 	for _, item := range items {
-		if packageName, ok := item.(string); ok {
-			packages = append(packages, packageName)
+		if value, ok := item.(string); ok {
+			result = append(result, value)
 		}
 	}
-	sort.Strings(packages)
-	return packages
+	sort.Strings(result)
+	return result
 }
 
-func (s *State) SetPackages(packages []string) {
-	unique := make(map[string]struct{}, len(packages))
-	for _, packageName := range packages {
-		unique[packageName] = struct{}{}
+func (s *State) SetItems(items []string, path ...string) {
+	unique := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		unique[item] = struct{}{}
 	}
 	result := make([]string, 0, len(unique))
-	for packageName := range unique {
-		result = append(result, packageName)
+	for item := range unique {
+		result = append(result, item)
 	}
 	sort.Strings(result)
 	values := make([]any, len(result))
-	for index, packageName := range result {
-		values[index] = packageName
+	for index, item := range result {
+		values[index] = item
 	}
-	s.Set(values, "managed", "packages")
+	s.Set(values, path...)
 }
 
 func (s *State) Write() error {

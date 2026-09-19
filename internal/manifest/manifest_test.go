@@ -81,6 +81,26 @@ func TestAddPackageWritesTargetManifest(t *testing.T) {
 	}
 }
 
+func TestResourceMetadataIsRetainedAndQueryable(t *testing.T) {
+	path := filepath.Join("..", "..", "testdata", "dotfiles-packages.yaml")
+	m, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups := m.MetadataStrings("common.packages", "groups")
+	if !contains(groups, "docker") {
+		t.Fatalf("groups = %#v", groups)
+	}
+	configs := m.MetadataStrings("profiles.desktop.packages.i3", "configs")
+	if !contains(configs, "linux/xinitrc:$HOME/.xinitrc") {
+		t.Fatalf("configs = %#v", configs)
+	}
+	services := m.ServiceNames("profiles.desktop.packages.desktop", "system")
+	if !contains(services, "bluetooth") {
+		t.Fatalf("services = %#v", services)
+	}
+}
+
 func contains(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
