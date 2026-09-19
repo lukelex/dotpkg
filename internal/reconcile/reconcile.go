@@ -151,7 +151,14 @@ func EnsureSelections(m *manifest.Manifest, s *state.State, options Options) (bo
 			return false, fmt.Errorf("no recorded desktop selection for option %s; run sync without --dry-run first", option)
 		}
 		fmt.Fprintf(options.Output, "\nOptional set %s includes:\n  %s\n", option, strings.Join(m.OptionPackages(option), ", "))
-		selected, err := askSelection(options, "Install optional set '"+option+"'? [y/N] ", false)
+		prompt := "Install optional set '" + option + "'? [y/N] "
+		if configured, ok := m.OptionPrompt(option); ok {
+			prompt = configured
+			if !strings.HasSuffix(prompt, " ") {
+				prompt += " "
+			}
+		}
+		selected, err := askSelection(options, prompt, m.OptionDefault(option))
 		if err != nil {
 			return false, err
 		}

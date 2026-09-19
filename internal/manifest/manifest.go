@@ -32,6 +32,9 @@ func Load(path, hostPath string) (*Manifest, error) {
 		}
 		base = mergeMaps(base, overlay)
 	}
+	if err := validate(base); err != nil {
+		return nil, fmt.Errorf("validate manifest %s: %w", path, err)
+	}
 	return &Manifest{Path: path, Data: base}, nil
 }
 
@@ -93,6 +96,313 @@ func mergeMaps(base, overlay map[string]any) map[string]any {
 	return result
 }
 
+func validate(data map[string]any) error {
+	if value, ok := data["source"]; ok {
+		if err := validateSource(value, "source"); err != nil {
+			return err
+		}
+	}
+	if value, ok := data["common"]; ok {
+		if err := validateProfileSection(value, "common"); err != nil {
+			return err
+		}
+	}
+	if value, ok := data["profiles"]; ok {
+		profiles, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("profiles must be a mapping")
+		}
+		for name, profile := range profiles {
+			if err := validateProfileSection(profile, "profiles."+name); err != nil {
+				return err
+			}
+		}
+	}
+	if value, ok := data["resources"]; ok {
+		if err := validateResources(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateProfileSection(value any, path string) error {
+	section, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s must be a mapping", path)
+	}
+	if packages, ok := section["packages"]; ok {
+		if err := validatePackageSection(packages, path+".packages"); err != nil {
+			return err
+		}
+	}
+	if options, ok := section["options"]; ok {
+		if err := validateOptions(options, path+".options"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePackageSection(value any, path string) error {
+	section, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s must be a mapping", path)
+	}
+	for category, packages := range section {
+		var err error
+		if mapping, ok := packages.(map[string]any); ok && isMetadataMapping(mapping) {
+			err = validatePackageValue(packages, path+"."+category)
+		} else {
+			err = validatePackageMap(packages, path+"."+category)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isMetadataMapping(value map[string]any) bool {
+	for _, key := range []string{"source", "groups", "configs", "services", "install"} {
+		if _, ok := value[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func validatePackageMap(value any, path string) error {
+	packages, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s must be a package mapping", path)
+	}
+	for name, packageValue := range packages {
+		if err := validatePackageValue(packageValue, path+"."+name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePackageValue(value any, path string) error {
+	if value == nil {
+		return nil
+	}
+	mapping, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s must be a package metadata mapping or null", path)
+	}
+	for key, child := range mapping {
+		fieldPath := path + "." + key
+		switch key {
+		case "source":
+			if err := validateSource(child, fieldPath); err != nil {
+				return err
+			}
+		case "groups":
+			if err := validateStringList(child, fieldPath); err != nil {
+				return err
+			}
+		case "configs":
+			if err := validateConfigs(child, fieldPath); err != nil {
+				return err
+			}
+		case "services":
+			if err := validatePackageServices(child, fieldPath); err != nil {
+				return err
+			}
+		case "install":
+			if _, ok := child.(bool); !ok {
+				return fmt.Errorf("%s must be a boolean", fieldPath)
+			}
+		}
+	}
+	return nil
+}
+
+func validateOptions(value any, path string) error {
+	options, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s must be a mapping", path)
+	}
+	for name, value := range options {
+		optionPath := path + "." + name
+		option, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s must be a mapping", optionPath)
+		}
+		for key, child := range option {
+			fieldPath := optionPath + "." + key
+			switch key {
+			case "packages":
+				if err := validatePackageMap(child, fieldPath); err != nil {
+					return err
+				}
+			case "prompt":
+				if _, ok := child.(string); !ok {
+					return fmt.Errorf("%s must be a string", fieldPath)
+				}
+			case "default":
+				if !isBoolean(child) {
+					return fmt.Errorf("%s must be a boolean", fieldPath)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func isBoolean(value any) bool {
+	if _, ok := value.(bool); ok {
+		return true
+	}
+	text, ok := value.(string)
+	return ok && (strings.EqualFold(text, "yes") || strings.EqualFold(text, "no"))
+}
+
+func validateResources(value any) error {
+	resources, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("resources must be a mapping")
+	}
+	if configs, ok := resources["configs"]; ok {
+		if err := validateConfigs(configs, "resources.configs"); err != nil {
+			return err
+		}
+	}
+	if services, ok := resources["services"]; ok {
+		if err := validateResourceServices(services); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateConfigs(value any, path string) error {
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("%s must be a list", path)
+	}
+	for index, item := range items {
+		itemPath := fmt.Sprintf("%s[%d]", path, index)
+		switch mapping := item.(type) {
+		case string:
+			if err := validateConfigMapping(mapping, itemPath); err != nil {
+				return err
+			}
+		case map[string]any:
+			source, sourceOK := mapping["source"].(string)
+			target, targetOK := mapping["target"].(string)
+			if !sourceOK || source == "" {
+				return fmt.Errorf("%s.source must be a non-empty string", itemPath)
+			}
+			if !targetOK || target == "" {
+				return fmt.Errorf("%s.target must be a non-empty string", itemPath)
+			}
+			if err := validateFilters(mapping, itemPath); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("%s must be a mapping string or resource mapping", itemPath)
+		}
+	}
+	return nil
+}
+
+func validateConfigMapping(value, path string) error {
+	separator := strings.IndexByte(value, ':')
+	if separator <= 0 || separator == len(value)-1 {
+		return fmt.Errorf("%s must use source:target form", path)
+	}
+	return nil
+}
+
+func validatePackageServices(value any, path string) error {
+	services, ok := value.(map[string]any)
+	if !ok {
+		return fmt.Errorf("%s must be a mapping", path)
+	}
+	for scope, names := range services {
+		if scope != "system" && scope != "user" {
+			return fmt.Errorf("%s.%s is not a supported service scope", path, scope)
+		}
+		if err := validateStringList(names, path+"."+scope); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateResourceServices(value any) error {
+	if mapping, ok := value.(map[string]any); ok {
+		for scope, names := range mapping {
+			if scope != "system" && scope != "user" {
+				return fmt.Errorf("resources.services.%s is not a supported service scope", scope)
+			}
+			if err := validateStringList(names, "resources.services."+scope); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("resources.services must be a mapping or list")
+	}
+	for index, item := range items {
+		path := fmt.Sprintf("resources.services[%d]", index)
+		mapping, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s must be a service resource mapping", path)
+		}
+		name, nameOK := mapping["name"].(string)
+		if !nameOK || name == "" {
+			return fmt.Errorf("%s.name must be a non-empty string", path)
+		}
+		scope, scopeOK := mapping["scope"].(string)
+		if !scopeOK || (scope != "system" && scope != "user") {
+			return fmt.Errorf("%s.scope must be system or user", path)
+		}
+		if err := validateFilters(mapping, path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateFilters(mapping map[string]any, path string) error {
+	for _, key := range []string{"profiles", "selections"} {
+		if value, ok := mapping[key]; ok {
+			if err := validateStringList(value, path+"."+key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func validateStringList(value any, path string) error {
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("%s must be a list of strings", path)
+	}
+	for index, item := range items {
+		if text, ok := item.(string); !ok || text == "" {
+			return fmt.Errorf("%s[%d] must be a non-empty string", path, index)
+		}
+	}
+	return nil
+}
+
+func validateSource(value any, path string) error {
+	source, ok := value.(string)
+	if !ok || (source != "repo" && source != "aur") {
+		return fmt.Errorf("%s must be repo or aur", path)
+	}
+	return nil
+}
+
 func (m *Manifest) Source() string {
 	if source, ok := m.Data["source"].(string); ok && source != "" {
 		return source
@@ -144,6 +454,23 @@ func (m *Manifest) OptionNames() []string {
 
 func (m *Manifest) OptionPackages(option string) []string {
 	return m.PackageNames("profiles.desktop.options." + option + ".packages")
+}
+
+func (m *Manifest) OptionPrompt(option string) (string, bool) {
+	value, ok := m.Value("profiles.desktop.options." + option + ".prompt").(string)
+	return value, ok && value != ""
+}
+
+func (m *Manifest) OptionDefault(option string) bool {
+	value := m.Value("profiles.desktop.options." + option + ".default")
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(typed, "yes") || strings.EqualFold(typed, "true")
+	default:
+		return false
+	}
 }
 
 func (m *Manifest) MetadataStrings(path, key string) []string {

@@ -23,6 +23,7 @@ type System interface {
 	RemoveFromGroup(context.Context, string, string) error
 	ServiceExists(context.Context, bool, string) (bool, error)
 	ServiceEnabled(context.Context, bool, string) (bool, error)
+	ReloadServices(context.Context, bool) error
 	EnableService(context.Context, bool, string) error
 	DisableService(context.Context, bool, string) error
 }
@@ -105,6 +106,11 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		{name: "services", plan: plan.Services, apply: func(p StagePlan) error { return applyServices(ctx, p, options, system) }, path: []string{"managed", "services"}},
 	} {
 		if stage.plan.Changes() == 0 {
+			if stage.name == "configs" && !options.DryRun {
+				if err := reloadForDeclaredConfigs(ctx, plan.Configs.Declared, options, system); err != nil {
+					return err
+				}
+			}
 			continue
 		}
 		if !options.Yes {
@@ -125,10 +131,41 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		items = append(items, stage.plan.Missing...)
 		if stage.name == "configs" {
 			items = matchingConfigs(stage.plan.Declared, options)
+			if err := reloadForDeclaredConfigs(ctx, plan.Configs.Declared, options, system); err != nil {
+				return err
+			}
 		}
 		s.SetItems(items, stage.path...)
 	}
 	return s.Write()
+}
+
+func reloadForDeclaredConfigs(ctx context.Context, declared []string, options Options, system System) error {
+	var reloadSystem, reloadUser bool
+	for _, mapping := range declared {
+		_, target, err := configPaths(mapping, options)
+		if err != nil {
+			return err
+		}
+		path := filepath.ToSlash(target)
+		switch {
+		case strings.Contains(path, "/systemd/user/"):
+			reloadUser = true
+		case strings.Contains(path, "/systemd/system/"):
+			reloadSystem = true
+		}
+	}
+	if reloadSystem {
+		if err := system.ReloadServices(ctx, false); err != nil {
+			return err
+		}
+	}
+	if reloadUser {
+		if err := system.ReloadServices(ctx, true); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func normalize(options Options, m *manifest.Manifest) Options {
@@ -277,6 +314,7 @@ func planConfigs(m *manifest.Manifest, s *state.State, options Options) (StagePl
 
 func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (StagePlan, error) {
 	declared := declaredServices(m, s, options.Profile)
+	configs := declaredMetadata(m, s, options.Profile, "configs")
 	planned := StagePlan{Declared: declared}
 	trackedSet := stringSet(s.Items("managed", "services"))
 	for _, service := range declared {
@@ -284,6 +322,9 @@ func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, opt
 		exists, err := system.ServiceExists(ctx, userService, name)
 		if err != nil {
 			return StagePlan{}, err
+		}
+		if !exists && configProvidesService(configs, service, options) {
+			exists = true
 		}
 		if !exists {
 			continue
@@ -302,6 +343,25 @@ func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, opt
 	}
 	planned.Extra = subtract(s.Items("managed", "services"), declared)
 	return sortPlan(planned), nil
+}
+
+func configProvidesService(configs []string, service string, options Options) bool {
+	userService := strings.HasPrefix(service, "user:")
+	name := strings.TrimPrefix(service, "user:")
+	suffix := "/systemd/system/" + name
+	if userService {
+		suffix = "/systemd/user/" + name
+	}
+	for _, mapping := range configs {
+		source, target, err := configPaths(mapping, options)
+		if err != nil || !strings.HasSuffix(filepath.ToSlash(target), suffix) {
+			continue
+		}
+		if _, err := os.Stat(source); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func applyGroups(ctx context.Context, plan StagePlan, options Options, system System) error {

@@ -227,17 +227,39 @@ func (a *Arch) ServiceEnabled(ctx context.Context, user bool, service string) (b
 }
 
 func (a *Arch) EnableService(ctx context.Context, user bool, service string) error {
-	if err := a.Runner.Run(ctx, "systemctl", serviceArgs(user, "enable", "--now", service), ""); err != nil {
+	if err := a.runSystemctl(ctx, user, "enable", "--now", service); err != nil {
 		return fmt.Errorf("enable service %s: %w", service, err)
 	}
 	return nil
 }
 
 func (a *Arch) DisableService(ctx context.Context, user bool, service string) error {
-	if err := a.Runner.Run(ctx, "systemctl", serviceArgs(user, "disable", "--now", service), ""); err != nil {
+	if err := a.runSystemctl(ctx, user, "disable", "--now", service); err != nil {
 		return fmt.Errorf("disable service %s: %w", service, err)
 	}
 	return nil
+}
+
+func (a *Arch) ReloadServices(ctx context.Context, user bool) error {
+	if err := a.runSystemctl(ctx, user, "daemon-reload"); err != nil {
+		return fmt.Errorf("reload %s services: %w", serviceScope(user), err)
+	}
+	return nil
+}
+
+func (a *Arch) runSystemctl(ctx context.Context, user bool, args ...string) error {
+	args = serviceArgs(user, args...)
+	if user {
+		return a.Runner.Run(ctx, "systemctl", args, "")
+	}
+	return a.Runner.Run(ctx, "sudo", append([]string{"systemctl"}, args...), "")
+}
+
+func serviceScope(user bool) string {
+	if user {
+		return "user"
+	}
+	return "system"
 }
 
 func serviceArgs(user bool, args ...string) []string {

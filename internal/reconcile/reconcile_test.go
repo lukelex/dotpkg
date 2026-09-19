@@ -200,7 +200,7 @@ profiles:
 	options, err := (Options{
 		ManifestPath: manifestPath,
 		Profile:      "desktop",
-		Input:        strings.NewReader("y\nn\ny\ny\n"),
+		Input:        strings.NewReader("y\nn\ny\n\n"),
 		Output:       &output,
 	}).normalize()
 	if err != nil {
@@ -226,10 +226,10 @@ profiles:
 			t.Fatalf("selection %s = %v, recorded = %v", path, got, recorded)
 		}
 	}
-	if strings.Contains(output.String(), "This prompt comes from metadata") {
-		t.Fatal("manifest prompt was used instead of compatibility prompt")
+	if !strings.Contains(output.String(), "This prompt comes from metadata") {
+		t.Fatal("manifest prompt was not used")
 	}
-	if !strings.Contains(output.String(), "Optional set optional includes:\n  optional-package\nInstall optional set 'optional'? [y/N] ") {
+	if !strings.Contains(output.String(), "Optional set optional includes:\n  optional-package\nThis prompt comes from metadata ") {
 		t.Fatalf("optional prompt output = %q", output.String())
 	}
 }

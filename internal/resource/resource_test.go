@@ -21,6 +21,7 @@ type fakeSystem struct {
 	removedGroups []string
 	enabled       []string
 	disabled      []string
+	reloaded      []string
 }
 
 func (f *fakeSystem) CurrentGroups(context.Context, string) ([]string, error) { return f.groups, nil }
@@ -47,6 +48,10 @@ func (f *fakeSystem) EnableService(_ context.Context, user bool, name string) er
 }
 func (f *fakeSystem) DisableService(_ context.Context, user bool, name string) error {
 	f.disabled = append(f.disabled, serviceKey(user, name))
+	return nil
+}
+func (f *fakeSystem) ReloadServices(_ context.Context, user bool) error {
+	f.reloaded = append(f.reloaded, serviceKey(user, "daemon-reload"))
 	return nil
 }
 
@@ -404,6 +409,75 @@ func TestCustomResourcesFollowProfileSelections(t *testing.T) {
 	}
 	if contains(plan.Configs.Declared, "config/custom:$XDG_CONFIG_HOME/custom") || contains(plan.Services.Declared, "user:custom.service") {
 		t.Fatalf("unselected custom resources remained: configs=%#v services=%#v", plan.Configs.Declared, plan.Services.Declared)
+	}
+}
+
+func TestConfigProvidedServiceIsReloadedAndEnabled(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "linux", "config", "tool.service")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, []byte("[Unit]\nDescription=tool\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "linux", "packages.yaml")
+	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	contents := `source: repo
+profiles:
+  desktop:
+    packages:
+      desktop:
+        tool:
+          configs:
+            - linux/config/tool.service:$XDG_CONFIG_HOME/systemd/user/tool.service
+          services:
+            user:
+              - tool.service
+      dotfiles: {}
+      extras: {}
+      hyprland: {}
+      i3: {}
+    options: {}
+`
+	if err := os.WriteFile(manifestPath, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Load(manifestPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := state.Load(filepath.Join(directory, "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, selection := range []string{"extras", "hyprland", "i3"} {
+		s.Set(false, "current", "selections", selection)
+	}
+	configHome := filepath.Join(directory, "config")
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	system := &fakeSystem{
+		services:     map[string]bool{},
+		serviceState: map[string]bool{},
+	}
+	options := Options{Profile: "desktop", RootPath: directory, User: "test-user", Yes: true}
+	plan, err := BuildPlan(context.Background(), m, s, options, system)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(plan.Services.Missing, "user:tool.service") {
+		t.Fatalf("service plan = %#v", plan.Services)
+	}
+	if err := Sync(context.Background(), m, s, options, system); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(system.reloaded, []string{"user:daemon-reload"}) {
+		t.Fatalf("reloaded services = %#v", system.reloaded)
+	}
+	if !reflect.DeepEqual(system.enabled, []string{"user:tool.service"}) {
+		t.Fatalf("enabled services = %#v", system.enabled)
 	}
 }
 

@@ -337,6 +337,9 @@ func TestArchResourceCommands(t *testing.T) {
 	if err := arch.EnableService(context.Background(), true, "example.service"); err != nil {
 		t.Fatal(err)
 	}
+	if err := arch.ReloadServices(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
 	if err := arch.DisableService(context.Background(), false, "docker.service"); err != nil {
 		t.Fatal(err)
 	}
@@ -351,7 +354,8 @@ func TestArchResourceCommands(t *testing.T) {
 		{"usermod", "-aG", "video", "lukas"},
 		{"gpasswd", "-d", "lukas", "docker"},
 		{"--user", "enable", "--now", "example.service"},
-		{"disable", "--now", "docker.service"},
+		{"systemctl", "daemon-reload"},
+		{"systemctl", "disable", "--now", "docker.service"},
 	}
 	if len(runs) != len(want) {
 		t.Fatalf("run calls = %#v", runs)

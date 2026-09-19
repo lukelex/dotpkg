@@ -67,6 +67,7 @@ npm
 nvidia-open
 nvidia-prime
 nvidia-settings
+opencode-desktop-bin
 openssh
 pantheon-calculator
 papirus-icon-theme
@@ -112,7 +113,6 @@ tofi
 tree
 ttf-hack
 ttf-hack-nerd
-ttf-lucide-font
 udiskie
 unrar
 unzip

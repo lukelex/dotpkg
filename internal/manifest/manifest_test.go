@@ -101,6 +101,89 @@ func TestResourceMetadataIsRetainedAndQueryable(t *testing.T) {
 	}
 }
 
+func TestManifestValidationRejectsMalformedConsumedFields(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{
+			name: "config mapping",
+			data: `source: aur
+common:
+  packages:
+    headless:
+      git:
+        configs: [not-a-mapping]
+`,
+			want: "source:target",
+		},
+		{
+			name: "service scope",
+			data: `source: aur
+profiles:
+  desktop:
+    packages:
+      desktop:
+        tool:
+          services:
+            session: [tool.service]
+`,
+			want: "not a supported service scope",
+		},
+		{
+			name: "custom service",
+			data: `source: aur
+resources:
+  services:
+    - name: custom.service
+      scope: session
+`,
+			want: "scope must be system or user",
+		},
+		{
+			name: "option default",
+			data: `source: aur
+profiles:
+  desktop:
+    options:
+      optional:
+        default: maybe
+`,
+			want: "default must be a boolean",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "packages.yaml")
+			if err := os.WriteFile(path, []byte(test.data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Load(path, "")
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error = %v, want substring %q", err, test.want)
+			}
+		})
+	}
+}
+
+func TestManifestValidationPreservesUnknownPackageMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages.yaml")
+	contents := []byte(`source: aur
+common:
+  packages:
+    headless:
+      git:
+        description: managed elsewhere
+`)
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, ""); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func contains(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {
