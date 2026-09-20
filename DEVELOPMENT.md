@@ -35,7 +35,7 @@ builds:
 
 ```sh
 docker build --target test .
-docker build --target runtime --build-arg VERSION=v0.4.0 -t dotpkg:dev .
+docker build --target runtime --build-arg VERSION=v0.5.0 -t dotpkg:dev .
 ```
 
 The runtime image contains only the static executable. Package reconciliation
