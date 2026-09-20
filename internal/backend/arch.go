@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,9 +16,14 @@ import (
 )
 
 type Arch struct {
-	HTTPClient *http.Client
-	Runner     Runner
+	HTTPClient    *http.Client
+	Runner        Runner
+	AURRetries    int
+	AURRetryDelay time.Duration
+	Logger        io.Writer
 }
+
+const yayBootstrapRevision = "4cf171c209a9ef4dc0f9e0c80f4e3b9900aeea90"
 
 // Runner makes command execution replaceable in tests without weakening the
 // production boundary, which always passes argv directly to exec.Command.
@@ -45,7 +51,35 @@ func (OSRunner) Run(ctx context.Context, name string, args []string, directory s
 }
 
 func NewArch() *Arch {
-	return &Arch{HTTPClient: &http.Client{Timeout: 30 * time.Second}, Runner: OSRunner{}}
+	return &Arch{
+		HTTPClient:    &http.Client{Timeout: 30 * time.Second},
+		Runner:        OSRunner{},
+		AURRetries:    3,
+		AURRetryDelay: 100 * time.Millisecond,
+		Logger:        io.Discard,
+	}
+}
+
+func (a *Arch) Configure(options Options) error {
+	if options.HTTPTimeout < 0 {
+		return fmt.Errorf("HTTP timeout cannot be negative")
+	}
+	if options.AURRetries < 1 {
+		return fmt.Errorf("AUR retries must be at least 1")
+	}
+	if options.AURRetryDelay < 0 {
+		return fmt.Errorf("AUR retry delay cannot be negative")
+	}
+	if a.HTTPClient == nil {
+		a.HTTPClient = &http.Client{}
+	}
+	a.HTTPClient.Timeout = options.HTTPTimeout
+	a.AURRetries = options.AURRetries
+	a.AURRetryDelay = options.AURRetryDelay
+	if options.Logger != nil {
+		a.Logger = options.Logger
+	}
+	return nil
 }
 
 func (a *Arch) IsInstalled(ctx context.Context, packageName string) (bool, error) {
@@ -112,7 +146,15 @@ func (a *Arch) AURPackages(ctx context.Context, names []string) (map[string]stru
 
 func (a *Arch) aurBatch(ctx context.Context, client *http.Client, query string) (aurResponse, error) {
 	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
+	retries := a.AURRetries
+	if retries < 1 {
+		retries = 3
+	}
+	delay := a.AURRetryDelay
+	if delay < 0 {
+		delay = 100 * time.Millisecond
+	}
+	for attempt := 0; attempt < retries; attempt++ {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://aur.archlinux.org/rpc/v5/info?"+query, nil)
 		if err != nil {
 			return aurResponse{}, fmt.Errorf("create AUR request: %w", err)
@@ -143,8 +185,10 @@ func (a *Arch) aurBatch(ctx context.Context, client *http.Client, query string) 
 			}
 			return payload, nil
 		}
-		if attempt < 2 {
-			timer := time.NewTimer(time.Duration(1<<attempt) * 100 * time.Millisecond)
+		if attempt < retries-1 {
+			backoff := delay * time.Duration(1<<attempt)
+			a.logf("AUR request attempt %d/%d failed: %v; retrying in %s", attempt+1, retries, lastErr, backoff)
+			timer := time.NewTimer(backoff)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -154,6 +198,12 @@ func (a *Arch) aurBatch(ctx context.Context, client *http.Client, query string) 
 		}
 	}
 	return aurResponse{}, lastErr
+}
+
+func (a *Arch) logf(format string, values ...any) {
+	if a.Logger != nil {
+		fmt.Fprintf(a.Logger, "dotpkg: "+format+"\n", values...)
+	}
 }
 
 func (a *Arch) Install(ctx context.Context, repository, aur []string, profile string) error {
@@ -325,6 +375,9 @@ func (a *Arch) bootstrapYay(ctx context.Context) error {
 	checkout := filepath.Join(directory, "yay-git")
 	if err := a.Runner.Run(ctx, "git", []string{"clone", "https://aur.archlinux.org/yay-git.git", checkout}, ""); err != nil {
 		return fmt.Errorf("clone yay: %w", err)
+	}
+	if err := a.Runner.Run(ctx, "git", []string{"-C", checkout, "checkout", "--detach", yayBootstrapRevision}, ""); err != nil {
+		return fmt.Errorf("pin yay source %s: %w", yayBootstrapRevision, err)
 	}
 	if err := a.Runner.Run(ctx, "makepkg", []string{"-si"}, checkout); err != nil {
 		return fmt.Errorf("build yay: %w", err)

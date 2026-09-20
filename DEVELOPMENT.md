@@ -35,7 +35,7 @@ builds:
 
 ```sh
 docker build --target test .
-docker build --target runtime --build-arg VERSION=v0.3.0 -t dotpkg:dev .
+docker build --target runtime --build-arg VERSION=v0.4.0 -t dotpkg:dev .
 ```
 
 The runtime image contains only the static executable. Package reconciliation
@@ -48,6 +48,7 @@ dotpkg validate --manifest packages.yaml --profile desktop
 dotpkg plan --manifest packages.yaml --profile desktop --state-file state.yaml
 dotpkg sync --manifest packages.yaml --profile desktop --state-file state.yaml
 dotpkg add lm_sensors --manifest packages.yaml --scope desktop
+dotpkg doctor --manifest packages.yaml --profile desktop
 ```
 
 Use `--manifest PATH` to select a different manifest, or set
@@ -65,6 +66,17 @@ dotpkg sync --manifest packages.yaml --profile desktop --yes
 Use `--output json` with `plan` or `sync` for machine-readable JSON Lines
 output. Resource mode emits one record for packages followed by records for
 groups, configs, and services.
+
+`doctor` is read-only. It checks package installation and availability, state
+validity, config links and sources, group membership, services, and backend
+support. It exits nonzero when it finds errors. Use `--output json` for a
+machine-readable report. Commands have a 10-minute timeout by default; use
+`--timeout 0` to disable it. AUR behavior can be tuned with
+`--backend-timeout`, `--aur-retries`, and `--aur-retry-delay`; `--verbose`
+prints retry diagnostics.
+
+The backend factory defaults to Arch. `DOTPKG_BACKEND=arch` is explicit today;
+the variable provides the extension point for future distribution backends.
 
 ## Custom resources
 
@@ -112,6 +124,9 @@ paths. A normal sync delegates groups, configuration links, and services too.
 
 The integration is pinned to a release rather than downloading `latest`. See
 [RELEASE.md](RELEASE.md) for asset verification details.
+
+If `yay` is absent, dotpkg bootstraps it from the AUR repository and checks out
+a pinned source revision before running `makepkg`.
 
 ## Release builds
 

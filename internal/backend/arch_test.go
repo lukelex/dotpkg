@@ -245,7 +245,7 @@ func TestArchInstallBootstrapsYay(t *testing.T) {
 			names = append(names, call.name)
 		}
 	}
-	if !reflect.DeepEqual(names, []string{"git", "makepkg", "yay"}) {
+	if !reflect.DeepEqual(names, []string{"git", "git", "makepkg", "yay"}) {
 		t.Fatalf("run commands = %#v", names)
 	}
 	for _, call := range runner.calls {
@@ -323,15 +323,29 @@ func TestBootstrapYayUsesTemporaryCheckout(t *testing.T) {
 	if err := arch.bootstrapYay(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	var cloned bool
 	for _, call := range runner.calls {
 		if call.kind == "run" && call.name == "git" {
 			if len(call.args) != 3 || call.args[0] != "clone" || filepath.Base(call.args[2]) != "yay-git" {
-				t.Fatalf("git clone call = %#v", call)
+				continue
 			}
-			return
+			cloned = true
 		}
 	}
-	t.Fatal("git clone was not called")
+	if !cloned {
+		t.Fatal("git clone was not called")
+	}
+	var pinned bool
+	for _, call := range runner.calls {
+		if call.kind == "run" && call.name == "git" && len(call.args) == 5 &&
+			call.args[0] == "-C" && call.args[2] == "checkout" && call.args[3] == "--detach" &&
+			call.args[4] == yayBootstrapRevision {
+			pinned = true
+		}
+	}
+	if !pinned {
+		t.Fatal("yay checkout was not pinned")
+	}
 }
 
 func TestArchResourceCommands(t *testing.T) {

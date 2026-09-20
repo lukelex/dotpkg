@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -11,8 +12,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/lukelex/dotpkg/internal/backend"
+	"github.com/lukelex/dotpkg/internal/doctor"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/reconcile"
 )
@@ -44,7 +47,10 @@ func run(ctx context.Context, args []string) error {
 		fmt.Println(version)
 		return nil
 	}
-	system := backend.NewArch()
+	system, err := backend.New()
+	if err != nil {
+		return err
+	}
 	switch args[0] {
 	case "validate":
 		return validate(ctx, args[1:], system)
@@ -54,6 +60,8 @@ func run(ctx context.Context, args []string) error {
 		return sync(ctx, args[1:], system, false)
 	case "add":
 		return add(ctx, args[1:], system)
+	case "doctor":
+		return doctorCommand(ctx, args[1:], system)
 	default:
 		return fmt.Errorf("unknown command %q (try --help)", args[0])
 	}
@@ -67,6 +75,7 @@ Commands:
   plan      Show package changes without modifying the system.
   sync      Reconcile declared packages and managed package state.
   add       Declare, validate, install, and track a package.
+  doctor    Diagnose manifest, state, backend, and resource drift.
   version   Print the version.
 
 Common options:
@@ -81,6 +90,11 @@ Common options:
   --replace          Replace conflicting config targets
   --restart-services Restart services backed by config links
   --output FORMAT    Plan output: text or json (default: text)
+  --timeout DURATION Command timeout (default: 10m, 0 disables)
+  --backend-timeout DURATION AUR HTTP timeout (default: 30s)
+  --aur-retries N   Number of AUR request attempts (default: 3)
+  --aur-retry-delay DURATION Initial AUR retry delay (default: 100ms)
+  --verbose         Log retry and operational diagnostics
   --help             Show this help`)
 }
 
@@ -96,6 +110,11 @@ type commonFlags struct {
 	replace         bool
 	restartServices bool
 	output          string
+	timeout         time.Duration
+	backendTimeout  time.Duration
+	aurRetries      int
+	aurRetryDelay   time.Duration
+	verbose         bool
 	help            bool
 	desktop         bool
 	server          bool
@@ -115,6 +134,11 @@ func (f *commonFlags) register(set *flag.FlagSet) {
 	set.BoolVar(&f.replace, "replace", false, "replace conflicting config targets")
 	set.BoolVar(&f.restartServices, "restart-services", false, "restart services backed by config links")
 	set.StringVar(&f.output, "output", "text", "plan output format")
+	set.DurationVar(&f.timeout, "timeout", 10*time.Minute, "command timeout; 0 disables")
+	set.DurationVar(&f.backendTimeout, "backend-timeout", 30*time.Second, "AUR HTTP timeout")
+	set.IntVar(&f.aurRetries, "aur-retries", 3, "AUR request attempts")
+	set.DurationVar(&f.aurRetryDelay, "aur-retry-delay", 100*time.Millisecond, "initial AUR retry delay")
+	set.BoolVar(&f.verbose, "verbose", false, "log operational diagnostics")
 	set.BoolVar(&f.desktop, "desktop", false, "use the desktop profile")
 	set.BoolVar(&f.server, "server", false, "use the server profile")
 	set.BoolVar(&f.help, "help", false, "show help")
@@ -158,6 +182,11 @@ func validate(ctx context.Context, args []string, system backend.Backend) error 
 		usage(os.Stdout)
 		return nil
 	}
+	if err := common.configureBackend(system); err != nil {
+		return err
+	}
+	ctx, cancel := common.commandContext(ctx)
+	defer cancel()
 	m, _, options, err := reconcile.Load(common.options())
 	if err != nil {
 		return err
@@ -189,6 +218,11 @@ func sync(ctx context.Context, args []string, system backend.Backend, planOnly b
 		usage(os.Stdout)
 		return nil
 	}
+	if err := common.configureBackend(system); err != nil {
+		return err
+	}
+	ctx, cancel := common.commandContext(ctx)
+	defer cancel()
 	if planOnly {
 		common.dryRun = true
 	}
@@ -213,6 +247,11 @@ func add(ctx context.Context, args []string, system backend.Backend) error {
 		usage(os.Stdout)
 		return nil
 	}
+	if err := common.configureBackend(system); err != nil {
+		return err
+	}
+	ctx, cancel := common.commandContext(ctx)
+	defer cancel()
 	if set.NArg() != 1 {
 		return fmt.Errorf("add requires exactly one package name")
 	}
@@ -223,6 +262,76 @@ func add(ctx context.Context, args []string, system backend.Backend) error {
 	return reconcile.WithLock(common.options(), func(options reconcile.Options) error {
 		return addLocked(ctx, packageName, *scope, options, system)
 	})
+}
+
+func doctorCommand(ctx context.Context, args []string, system backend.Backend) error {
+	set := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	set.SetOutput(os.Stderr)
+	var common commonFlags
+	common.register(set)
+	if err := set.Parse(args); err != nil {
+		return err
+	}
+	if common.help {
+		usage(os.Stdout)
+		return nil
+	}
+	if err := common.configureBackend(system); err != nil {
+		return err
+	}
+	ctx, cancel := common.commandContext(ctx)
+	defer cancel()
+	m, s, options, err := reconcile.Load(common.options())
+	if err != nil {
+		return err
+	}
+	report := doctor.Run(ctx, m, s, options, system)
+	printDoctor(options.Output, report, options.OutputFormat)
+	if report.Errors() > 0 {
+		return fmt.Errorf("doctor found %d error(s)", report.Errors())
+	}
+	return nil
+}
+
+func (f commonFlags) configureBackend(system backend.Backend) error {
+	configurable, ok := system.(backend.Configurable)
+	if !ok {
+		return nil
+	}
+	logger := io.Discard
+	if f.verbose {
+		logger = os.Stderr
+	}
+	return configurable.Configure(backend.Options{
+		HTTPTimeout:   f.backendTimeout,
+		AURRetries:    f.aurRetries,
+		AURRetryDelay: f.aurRetryDelay,
+		Logger:        logger,
+	})
+}
+
+func (f commonFlags) commandContext(parent context.Context) (context.Context, context.CancelFunc) {
+	if f.timeout <= 0 {
+		return parent, func() {}
+	}
+	return context.WithTimeout(parent, f.timeout)
+}
+
+func printDoctor(output io.Writer, report doctor.Report, format string) {
+	if format == "json" {
+		_ = json.NewEncoder(output).Encode(struct {
+			OK       bool             `json:"ok"`
+			Findings []doctor.Finding `json:"findings"`
+		}{OK: report.Errors() == 0, Findings: report.Findings})
+		return
+	}
+	if len(report.Findings) == 0 {
+		fmt.Fprintln(output, "doctor: no issues found")
+		return
+	}
+	for _, finding := range report.Findings {
+		fmt.Fprintf(output, "%s: %s: %s\n", finding.Severity, finding.Check, finding.Message)
+	}
 }
 
 func addLocked(ctx context.Context, packageName, requestedScope string, options reconcile.Options, system backend.Backend) error {

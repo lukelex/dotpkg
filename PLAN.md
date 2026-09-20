@@ -39,12 +39,16 @@ repositories/releases.
   dotpkg plan
   dotpkg sync
   dotpkg add
+  dotpkg doctor
   dotpkg version
   ```
 
 - [x] Added compatibility aliases such as `--desktop`, `--server`, and `--check`.
 - [x] Added tests for manifest merging, state handling, reconciliation, and the
   current dotfiles manifest.
+- [x] Added read-only diagnostics for package, state, backend, and resource drift.
+- [x] Added fake-command integration coverage for filesystem resources and
+  package-manager failures.
 - [x] Confirmed the standalone planner sees exactly 142 package names for the
   current desktop manifest with all selections enabled.
 - [x] Added GitHub Actions CI and static release builds for:

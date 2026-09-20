@@ -33,6 +33,9 @@ func TestWithLockRejectsConcurrentOperation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "state is locked") {
 		t.Fatalf("nested lock error = %v", err)
 	}
+	if !strings.Contains(err.Error(), "pid=") {
+		t.Fatalf("lock diagnostics = %v", err)
+	}
 }
 
 func TestWithLockSkipsLockForDryRun(t *testing.T) {

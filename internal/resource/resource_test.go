@@ -530,6 +530,32 @@ func TestConfigConflictDoesNotRemoveDirectory(t *testing.T) {
 	}
 }
 
+func TestInspectConfigDetectsBrokenSourceSymlink(t *testing.T) {
+	directory := t.TempDir()
+	source := filepath.Join(directory, "config", "tool")
+	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing-target", source); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(t.TempDir(), "tool")
+	if err := os.Symlink(source, target); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", filepath.Dir(target))
+	status, err := InspectConfig("config/tool:$HOME/tool", Options{RootPath: directory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.SourceExists {
+		t.Fatal("broken source symlink was reported as valid")
+	}
+	if !status.TargetExists || !status.Matches {
+		t.Fatalf("target status = %#v", status)
+	}
+}
+
 func readResourceFixture(t *testing.T, name string) []string {
 	t.Helper()
 	contents, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fixtures", name))

@@ -28,6 +28,10 @@ jobs:
               *.sh|dotfiles-package-stage) bash -n "$script" ;;
             esac
           done
+      - name: Run integration tests
+        run: |
+          set -Eeuo pipefail
+          for test in integration/*.test.sh; do bash "$test"; done
       - name: Check whitespace
         run: git diff --check
       - run: go test ./...

@@ -22,7 +22,9 @@ chmod 0755 dotpkg-linux-amd64
 
 Use the ARM64 asset on ARM64 hosts. The release is libc-independent, but one
 ELF cannot run on both CPU architectures. The executable still requires host
-tools such as `pacman`, `yay`, `sudo`, and possibly `systemd`.
+tools such as `pacman`, `yay`, `sudo`, and possibly `systemd`. If `yay` is
+missing, dotpkg checks out a pinned `yay-git` revision before building it; it
+does not build an unpinned moving checkout.
 
 The dotfiles integration must pin `version` and its expected checksum. It must
 not download or execute a moving `latest` release.

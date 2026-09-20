@@ -20,11 +20,12 @@ larger system provisioning workflows.
   manifest identity are recorded atomically. Existing shared state retains
   resource-stage fields that dotpkg does not own.
 - **Backend isolation:** Distribution-specific behavior lives behind a backend
-  interface. The current Arch backend uses `pacman`, `yay`, and the AUR RPC;
-  other backends can be added without changing manifest or planning logic.
+  factory and interface. The current Arch backend uses `pacman`, `yay`, and the
+  AUR RPC; other backends can be added without changing manifest or planning
+  logic.
 - **Safe execution:** Plans can be inspected before application, updates are
-  serialized, and the executable is built as a static per-architecture Linux
-  binary.
+  serialized with owner diagnostics, bounded by command and HTTP timeouts, and
+  the executable is built as a static per-architecture Linux binary.
 
 The default integration owns package reconciliation plus separately tested
 groups, configuration links, and service resource stages. Package-only operation

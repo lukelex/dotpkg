@@ -50,6 +50,15 @@ type StagePlan struct {
 	Extra    []string
 }
 
+type ConfigStatus struct {
+	Source       string
+	Target       string
+	SourceExists bool
+	TargetExists bool
+	TargetIsDir  bool
+	Matches      bool
+}
+
 func (p StagePlan) Changes() int {
 	return len(p.Adopted) + len(p.Missing) + len(p.Extra)
 }
@@ -81,6 +90,36 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, option
 		return Plan{}, err
 	}
 	return Plan{Groups: groups, Configs: configs, Services: services}, nil
+}
+
+// InspectConfig reports the filesystem state of a declared config mapping
+// without changing it. It is used by diagnostics and deliberately exposes
+// status rather than internal path parsing details.
+func InspectConfig(mapping string, options Options) (ConfigStatus, error) {
+	source, target, err := configPaths(mapping, options)
+	if err != nil {
+		return ConfigStatus{}, err
+	}
+	status := ConfigStatus{Source: source, Target: target}
+	if _, err := os.Stat(source); err == nil {
+		status.SourceExists = true
+	} else if !os.IsNotExist(err) {
+		return status, fmt.Errorf("inspect config source %s: %w", source, err)
+	}
+	if info, err := os.Lstat(target); err == nil {
+		status.TargetExists = true
+		status.TargetIsDir = info.IsDir()
+	} else if !os.IsNotExist(err) {
+		return status, fmt.Errorf("inspect config target %s: %w", target, err)
+	}
+	if status.TargetExists {
+		matches, err := configMatches(target, source)
+		if err != nil {
+			return status, err
+		}
+		status.Matches = matches
+	}
+	return status, nil
 }
 
 func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) error {
@@ -346,7 +385,7 @@ func planConfigs(m *manifest.Manifest, s *state.State, options Options) (StagePl
 		if err != nil {
 			return StagePlan{}, err
 		}
-		if _, err := os.Lstat(source); err != nil {
+		if _, err := os.Stat(source); err != nil {
 			return StagePlan{}, fmt.Errorf("config source %s: %w", source, err)
 		}
 		matches, err := configMatches(target, source)
