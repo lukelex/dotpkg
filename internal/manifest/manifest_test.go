@@ -195,6 +195,7 @@ profiles:
           source: appimage
           address: https://github.com/acme/tool/releases/download/v1.2.3/tool.AppImage
           target: $HOME/.local/bin/tool
+          sha256: ` + strings.Repeat("a", 64) + `
 `)
 	if err := os.WriteFile(path, contents, 0o644); err != nil {
 		t.Fatal(err)
@@ -204,11 +205,31 @@ profiles:
 		t.Fatal(err)
 	}
 	spec, ok := m.AppImage("tool")
-	if !ok || spec.Address == "" || spec.Target != "$HOME/.local/bin/tool" {
+	if !ok || spec.Address == "" || spec.Target != "$HOME/.local/bin/tool" || spec.Sha256 != strings.Repeat("a", 64) {
 		t.Fatalf("AppImage spec = %#v, found = %v", spec, ok)
 	}
 	if got := m.PackageOrigin("tool"); got != "appimage" {
 		t.Fatalf("origin = %q", got)
+	}
+}
+
+func TestAppImageValidationRejectsMalformedDigest(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages.yaml")
+	contents := []byte(`source: repo
+common:
+  packages:
+    headless:
+      tool:
+        source: appimage
+        address: https://example.invalid/tool.AppImage
+        sha256: not-a-digest
+`)
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path, "")
+	if err == nil || !strings.Contains(err.Error(), "SHA256") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

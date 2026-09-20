@@ -222,6 +222,10 @@ func validatePackageValue(value any, path string) error {
 			if _, ok := child.(bool); !ok {
 				return fmt.Errorf("%s must be a boolean", fieldPath)
 			}
+		case "sha256":
+			if err := validateSha256(child, fieldPath); err != nil {
+				return err
+			}
 		}
 	}
 	if source == "appimage" {
@@ -424,11 +428,26 @@ func validateSource(value any, path string) error {
 	return nil
 }
 
+func validateSha256(value any, path string) error {
+	text, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("%s must be a string", path)
+	}
+	if len(text) != 64 {
+		return fmt.Errorf("%s must be a 64-character SHA256 digest", path)
+	}
+	if _, err := hex.DecodeString(text); err != nil {
+		return fmt.Errorf("%s must be a hexadecimal SHA256 digest", path)
+	}
+	return nil
+}
+
 // AppImageSpec is the manifest metadata needed to install one AppImage.
 type AppImageSpec struct {
 	Name    string
 	Address string
 	Target  string
+	Sha256  string
 }
 
 // AppImage returns the AppImage metadata attached to a package node.
@@ -451,6 +470,7 @@ func (m *Manifest) AppImage(name string) (AppImageSpec, bool) {
 					if addressOK && address != "" {
 						result = AppImageSpec{Name: name, Address: address}
 						result.Target, _ = metadata["target"].(string)
+						result.Sha256, _ = metadata["sha256"].(string)
 						found = true
 					}
 				}

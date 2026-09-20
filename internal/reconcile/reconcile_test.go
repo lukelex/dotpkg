@@ -283,6 +283,7 @@ profiles:
         tool:
           source: appimage
           address: https://github.com/acme/tool/releases/download/v1.0.0/tool.AppImage
+          sha256: ` + strings.Repeat("a", 64) + `
 `)
 	if err := os.WriteFile(path, contents, 0o600); err != nil {
 		t.Fatal(err)
@@ -307,6 +308,9 @@ profiles:
 	}
 	if !reflect.DeepEqual(plan.Missing, []string{"tool"}) || plan.Records["tool"].Target == "" {
 		t.Fatalf("plan = %#v", plan)
+	}
+	if got := plan.Specs["tool"].Sha256; got != strings.Repeat("a", 64) {
+		t.Fatalf("pinned sha256 = %q", got)
 	}
 }
 

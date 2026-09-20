@@ -25,6 +25,7 @@ type Spec struct {
 	Name    string
 	Address string
 	Target  string
+	Sha256  string
 }
 
 // Artifact is the resolved, integrity-checked source for an AppImage.
@@ -80,6 +81,15 @@ func (c *Client) Resolve(ctx context.Context, spec Spec) (Artifact, error) {
 		return Artifact{}, err
 	}
 	artifact := Artifact{Address: u.String()}
+	if spec.Sha256 != "" {
+		_, digest, err := parseDigest(spec.Sha256, "sha256")
+		if err != nil {
+			return Artifact{}, fmt.Errorf("invalid pinned SHA256 for %s: %w", spec.Name, err)
+		}
+		artifact.Algorithm = "sha256"
+		artifact.Digest = digest
+		return artifact, nil
+	}
 	var resolutionErrors []string
 	if owner, repository, tag, asset, ok := githubReleaseAddress(u); ok {
 		digest, found, resolveErr := c.githubDigest(ctx, owner, repository, tag, asset)

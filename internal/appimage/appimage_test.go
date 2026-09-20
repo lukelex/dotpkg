@@ -67,6 +67,33 @@ func TestResolveRejectsLatest(t *testing.T) {
 	}
 }
 
+func TestResolveUsesPinnedDigest(t *testing.T) {
+	digest := strings.Repeat("d", 64)
+	client := New()
+	artifact, err := client.Resolve(context.Background(), Spec{
+		Name:    "tool",
+		Address: "https://example.invalid/files/bin/1.2.3/tool.AppImage",
+		Sha256:  strings.ToUpper(digest),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if artifact.Algorithm != "sha256" || artifact.Digest != digest || artifact.Address != "https://example.invalid/files/bin/1.2.3/tool.AppImage" {
+		t.Fatalf("artifact = %#v", artifact)
+	}
+}
+
+func TestResolveRejectsMalformedPinnedDigest(t *testing.T) {
+	_, err := New().Resolve(context.Background(), Spec{
+		Name:    "tool",
+		Address: "https://example.invalid/tool.AppImage",
+		Sha256:  "zzz",
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid pinned SHA256") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestInstallVerifiesAndRemovesAppImage(t *testing.T) {
 	contents := []byte("fake AppImage")
 	digest := sha256.Sum256(contents)

@@ -184,7 +184,10 @@ AppImages are handled as a separate managed artifact stage rather than passed
 to `pacman`, `apt`, or `dnf`. The node supplies an HTTPS `address`; a checksum
 does not need to be written manually. GitHub release assets use their published
 SHA256 digest, while other hosts must expose a `.sha256`/`.sha256sum` sidecar
-or `.zsync` metadata. Version-pinned addresses are required and `latest` is
+or `.zsync` metadata. For hosts that resolve no digest automatically (for
+example builds served behind a JSON-only update API), the node can pin one
+directly with `sha256: <64-hex>`; the download is then verified against it.
+Version-pinned addresses are required and `latest` is
 rejected. The default target is `$HOME/.local/bin/<node-name>`; explicit
 targets must stay inside the user home directory.
 
