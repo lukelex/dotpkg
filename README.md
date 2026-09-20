@@ -67,6 +67,20 @@ dotpkg doctor --profile desktop
 without overwriting existing files. Once initialized, commands automatically
 use those files. `--manifest` and `--state-file` remain explicit overrides.
 
+### User configuration discovery
+
+Manifest resolution uses the following order:
+
+1. `--manifest PATH`
+2. `DOTPKG_MANIFEST`
+3. `$XDG_CONFIG_HOME/dotpkg/package.yaml` (or `~/.config/dotpkg/package.yaml`)
+   after initialization
+4. `packages.yaml` in the current directory for compatibility
+
+When the initialized manifest is selected, the adjacent `state.yaml` is used
+unless `--state-file PATH` is supplied. Legacy working-directory manifests
+continue to use `$XDG_STATE_HOME/dotpkg/state.yaml` by default.
+
 Use `clean --yes` only when removing stale managed packages is intended. If a
 transaction is interrupted and a journal remains beside the state file, review
 it and run `dotpkg recover --yes`.
@@ -80,7 +94,7 @@ Releases provide libc-independent static binaries for `linux/amd64` and
 `linux/arm64`. Download a pinned release and verify it before installing:
 
 ```sh
-version=v0.9.0
+version=v0.10.0
 curl --fail --location --remote-name \
   "https://github.com/lukelex/dotpkg/releases/download/${version}/dotpkg-linux-amd64"
 curl --fail --location --remote-name \
@@ -136,6 +150,7 @@ the manifest; resource paths resolve relative to its directory unless
 The command set is:
 
 ```text
+init       Create the per-user manifest and state files
 validate   Validate manifest packages and backend availability
 plan       Show package changes without applying them
 diff       Read-only alias for plan
@@ -146,7 +161,6 @@ add        Declare, validate, install, and track one package
 doctor     Produce read-only diagnostics
 completion Generate Bash, Zsh, or Fish completion
 version    Print the executable version
-init       Create the per-user manifest and state files
 ```
 
 Use `--output json` with `plan`, `diff`, `sync`, or `clean` for a unified,
