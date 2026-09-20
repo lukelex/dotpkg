@@ -32,6 +32,9 @@ repositories/releases.
 - [x] Implemented legacy state migration from the old `packages` state file.
 - [x] Implemented an Arch backend using `pacman`, `yay`, AUR RPC, and `makepkg`-
   based `yay` bootstrapping.
+- [x] Implemented managed AppImage nodes with pinned HTTPS addresses, automatic
+  GitHub/sidecar/zsync integrity resolution, atomic installation, state,
+  cleanup, diagnostics, and recovery support.
 - [x] Added commands:
 
   ```text

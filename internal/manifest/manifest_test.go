@@ -184,6 +184,52 @@ common:
 	}
 }
 
+func TestAppImagePackageMetadata(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages.yaml")
+	contents := []byte(`source: repo
+profiles:
+  desktop:
+    packages:
+      desktop:
+        tool:
+          source: appimage
+          address: https://github.com/acme/tool/releases/download/v1.2.3/tool.AppImage
+          target: $HOME/.local/bin/tool
+`)
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := m.AppImage("tool")
+	if !ok || spec.Address == "" || spec.Target != "$HOME/.local/bin/tool" {
+		t.Fatalf("AppImage spec = %#v, found = %v", spec, ok)
+	}
+	if got := m.PackageOrigin("tool"); got != "appimage" {
+		t.Fatalf("origin = %q", got)
+	}
+}
+
+func TestAppImageValidationRejectsUnpinnedAddress(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages.yaml")
+	contents := []byte(`source: repo
+common:
+  packages:
+    headless:
+      tool:
+        source: appimage
+        address: https://example.invalid/releases/latest/tool.AppImage
+`)
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path, ""); err == nil || !strings.Contains(err.Error(), "pin a release") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func contains(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {

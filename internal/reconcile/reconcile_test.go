@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lukelex/dotpkg/internal/appimage"
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/recovery"
@@ -272,6 +273,110 @@ func TestRecoverRollsBackJournalAndClearsIt(t *testing.T) {
 	}
 }
 
+func TestBuildAppImagePlanResolvesDeclaredNode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages.yaml")
+	contents := []byte(`source: repo
+profiles:
+  server:
+    packages:
+      headless:
+        tool:
+          source: appimage
+          address: https://github.com/acme/tool/releases/download/v1.0.0/tool.AppImage
+`)
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := state.Load(filepath.Join(t.TempDir(), "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeAppImage{artifact: appimage.Artifact{
+		Address:   "https://github.com/acme/tool/releases/download/v1.0.0/tool.AppImage",
+		Algorithm: "sha256",
+		Digest:    strings.Repeat("a", 64),
+		Version:   "v1.0.0",
+	}}
+	plan, err := BuildAppImagePlan(context.Background(), m, s, "server", fake)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(plan.Missing, []string{"tool"}) || plan.Records["tool"].Target == "" {
+		t.Fatalf("plan = %#v", plan)
+	}
+}
+
+func TestSyncInstallsAndTracksAppImage(t *testing.T) {
+	manifestPath := filepath.Join(t.TempDir(), "packages.yaml")
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	contents := []byte(`source: repo
+profiles:
+  server:
+    packages:
+      headless:
+        tool:
+          source: appimage
+          address: https://github.com/acme/tool/releases/download/v1.0.0/tool.AppImage
+`)
+	if err := os.WriteFile(manifestPath, contents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	appSystem := &fakeAppImage{artifact: appimage.Artifact{
+		Address:   "https://github.com/acme/tool/releases/download/v1.0.0/tool.AppImage",
+		Algorithm: "sha256",
+		Digest:    strings.Repeat("b", 64),
+		Version:   "v1.0.0",
+	}}
+	fake := &fakeBackend{installed: map[string]bool{}}
+	if err := Sync(context.Background(), Options{
+		ManifestPath:   manifestPath,
+		StatePath:      statePath,
+		Profile:        "server",
+		Yes:            true,
+		AppImageSystem: appSystem,
+	}, fake); err != nil {
+		t.Fatal(err)
+	}
+	if !appSystem.installed["tool"] {
+		t.Fatal("AppImage was not installed")
+	}
+	s, err := state.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := s.AppImages()["tool"]; !ok {
+		t.Fatalf("AppImages = %#v", s.AppImages())
+	}
+	if _, err := os.Stat(recovery.Path(statePath)); !os.IsNotExist(err) {
+		t.Fatalf("journal error = %v", err)
+	}
+}
+
+func TestRecoverRemovesPendingAppImage(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	fake := &fakeAppImage{
+		artifact:  appimage.Artifact{Address: "https://example.invalid/tool.AppImage", Algorithm: "sha256", Digest: strings.Repeat("c", 64)},
+		installed: map[string]bool{"tool": true},
+	}
+	journal := recovery.New(statePath, "server", recovery.Packages{}, recovery.Packages{})
+	journal.AppImages.Installed = []recovery.AppImage{{
+		Name: "tool", Address: "https://example.invalid/tool.AppImage", Target: "/tmp/tool", Algorithm: "sha256", Digest: strings.Repeat("c", 64),
+	}}
+	if err := journal.Write(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Recover(context.Background(), Options{StatePath: statePath, Profile: "server", Yes: true, AppImageSystem: fake}, &fakeBackend{installed: map[string]bool{}}); err != nil {
+		t.Fatal(err)
+	}
+	if fake.installed["tool"] {
+		t.Fatal("pending AppImage was not removed")
+	}
+}
+
 func TestEnsureSelectionsMatchesInteractivePromptsAndConsumesAnswers(t *testing.T) {
 	directory := t.TempDir()
 	manifestPath := filepath.Join(directory, "packages.yaml")
@@ -397,6 +502,45 @@ func (f *fakeBackend) Remove(_ context.Context, packages []string, profile strin
 }
 
 var _ backend.Backend = (*fakeBackend)(nil)
+
+type fakeAppImage struct {
+	artifact  appimage.Artifact
+	target    string
+	installed map[string]bool
+}
+
+func (f *fakeAppImage) Resolve(_ context.Context, _ appimage.Spec) (appimage.Artifact, error) {
+	return f.artifact, nil
+}
+
+func (f *fakeAppImage) Target(spec appimage.Spec) (string, error) {
+	if f.target != "" {
+		return f.target, nil
+	}
+	return filepath.Join("/tmp", spec.Name), nil
+}
+
+func (f *fakeAppImage) Installed(_ context.Context, record appimage.Record) (bool, error) {
+	return f.installed != nil && f.installed[record.Name], nil
+}
+
+func (f *fakeAppImage) Install(_ context.Context, spec appimage.Spec, artifact appimage.Artifact) (appimage.Record, error) {
+	if f.installed == nil {
+		f.installed = map[string]bool{}
+	}
+	f.installed[spec.Name] = true
+	target, _ := f.Target(spec)
+	return appimage.Record{Name: spec.Name, Address: artifact.Address, Target: target, Algorithm: artifact.Algorithm, Digest: artifact.Digest, Version: artifact.Version}, nil
+}
+
+func (f *fakeAppImage) Remove(_ context.Context, record appimage.Record) error {
+	if f.installed != nil {
+		delete(f.installed, record.Name)
+	}
+	return nil
+}
+
+var _ appimage.System = (*fakeAppImage)(nil)
 
 func testManifest(t *testing.T) string {
 	t.Helper()

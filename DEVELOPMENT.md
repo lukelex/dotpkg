@@ -90,6 +90,31 @@ machine-readable report. Commands have a 10-minute timeout by default; use
 `--backend-timeout`, `--aur-retries`, and `--aur-retry-delay`; `--verbose`
 prints retry diagnostics.
 
+AppImage package nodes are reconciled separately from distribution packages:
+
+```yaml
+source: repo
+profiles:
+  desktop:
+    packages:
+      desktop:
+        tool:
+          source: appimage
+          address: https://github.com/vendor/tool/releases/download/v1.2.3/tool-x86_64.AppImage
+          target: $HOME/.local/bin/tool
+```
+
+`address` must be an HTTPS URL for a pinned release; `latest` URLs are
+rejected. The checksum is intentionally not stored in the manifest. For GitHub
+release assets dotpkg reads the published asset digest through the Releases
+API. Other publishers must provide a `.sha256`/`.sha256sum` sidecar or `.zsync`
+metadata. AppImages without verifiable integrity metadata are rejected.
+`target` is optional and defaults to `$HOME/.local/bin/<package-name>`.
+Targets must remain inside the user home directory. AppImages appear in their
+own `appimages` plan stage, are tracked with their resolved digest and version,
+and are removed only when recorded as managed. AppImage updates and removals
+participate in the recovery journal.
+
 The backend factory defaults to Arch. Select the other supported package
 managers explicitly with `DOTPKG_BACKEND=debian` or `DOTPKG_BACKEND=fedora`.
 `DOTPKG_BACKEND=arch` is also accepted explicitly. AUR packages are rejected

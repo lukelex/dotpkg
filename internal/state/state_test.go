@@ -121,3 +121,29 @@ func TestStatePackageOriginsRoundTrip(t *testing.T) {
 		t.Fatalf("origins = %#v", got)
 	}
 }
+
+func TestStateAppImagesRoundTrip(t *testing.T) {
+	s, err := Load(filepath.Join(t.TempDir(), "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetAppImages(map[string]AppImage{
+		"tool": {
+			Address:   "https://example.invalid/tool.AppImage",
+			Target:    "/home/test/.local/bin/tool",
+			Algorithm: "sha256",
+			Digest:    strings.Repeat("a", 64),
+			Version:   "v1.0.0",
+		},
+	})
+	if err := s.Write(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.AppImages()["tool"]; got.Digest != strings.Repeat("a", 64) || got.Version != "v1.0.0" {
+		t.Fatalf("AppImages = %#v", loaded.AppImages())
+	}
+}

@@ -17,14 +17,29 @@ type Packages struct {
 	Unknown    []string `yaml:"unknown,omitempty" json:"unknown,omitempty"`
 }
 
+type AppImage struct {
+	Name      string `yaml:"name" json:"name"`
+	Address   string `yaml:"address" json:"address"`
+	Target    string `yaml:"target" json:"target"`
+	Algorithm string `yaml:"algorithm" json:"algorithm"`
+	Digest    string `yaml:"digest" json:"digest"`
+	Version   string `yaml:"version,omitempty" json:"version,omitempty"`
+}
+
+type AppImages struct {
+	Installed []AppImage `yaml:"installed,omitempty" json:"installed,omitempty"`
+	Removed   []AppImage `yaml:"removed,omitempty" json:"removed,omitempty"`
+}
+
 type Journal struct {
-	Version   int      `yaml:"version" json:"version"`
-	StartedAt string   `yaml:"started_at" json:"started_at"`
-	StatePath string   `yaml:"state_path" json:"state_path"`
-	Profile   string   `yaml:"profile" json:"profile"`
-	Completed bool     `yaml:"completed,omitempty" json:"completed,omitempty"`
-	Installed Packages `yaml:"installed" json:"installed"`
-	Removed   Packages `yaml:"removed" json:"removed"`
+	Version   int       `yaml:"version" json:"version"`
+	StartedAt string    `yaml:"started_at" json:"started_at"`
+	StatePath string    `yaml:"state_path" json:"state_path"`
+	Profile   string    `yaml:"profile" json:"profile"`
+	Completed bool      `yaml:"completed,omitempty" json:"completed,omitempty"`
+	Installed Packages  `yaml:"installed" json:"installed"`
+	Removed   Packages  `yaml:"removed" json:"removed"`
+	AppImages AppImages `yaml:"appimages,omitempty" json:"appimages,omitempty"`
 }
 
 func Path(statePath string) string { return statePath + ".journal.yaml" }

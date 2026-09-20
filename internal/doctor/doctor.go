@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/lukelex/dotpkg/internal/appimage"
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/reconcile"
@@ -48,6 +49,21 @@ func Run(ctx context.Context, m *manifest.Manifest, s *state.State, options reco
 		}
 		for _, packageName := range plan.Extra {
 			report.add("warning", "packages", fmt.Sprintf("managed package is no longer declared: %s", packageName))
+		}
+	}
+	appSystem := options.AppImageSystem
+	if appSystem == nil {
+		appSystem = appimage.New()
+	}
+	appImagePlan, err := reconcile.BuildAppImagePlan(ctx, m, s, options.Profile, appSystem)
+	if err != nil {
+		report.add("error", "appimages", err.Error())
+	} else {
+		for _, name := range appImagePlan.Missing {
+			report.add("error", "appimages", fmt.Sprintf("declared AppImage is missing or stale: %s", name))
+		}
+		for _, name := range appImagePlan.Extra {
+			report.add("warning", "appimages", fmt.Sprintf("managed AppImage is no longer declared: %s", name))
 		}
 	}
 

@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lukelex/dotpkg/internal/appimage"
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/recovery"
@@ -32,6 +33,7 @@ type Options struct {
 	Replace         bool
 	RestartServices bool
 	ResourceSystem  resource.System
+	AppImageSystem  appimage.System
 	Input           io.Reader
 	Output          io.Writer
 	OutputFormat    string
@@ -42,6 +44,14 @@ type Plan struct {
 	Adopted  []string
 	Missing  []string
 	Extra    []string
+}
+
+type AppImagePlan struct {
+	Plan
+	Specs     map[string]appimage.Spec
+	Artifacts map[string]appimage.Artifact
+	Records   map[string]appimage.Record
+	Previous  map[string]appimage.Record
 }
 
 type PlanChange struct {
@@ -71,7 +81,7 @@ type PlanDocument struct {
 	Stages   []PlanStage `json:"stages"`
 }
 
-func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Options) PlanDocument {
+func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Options, appImagePlans ...AppImagePlan) PlanDocument {
 	document := PlanDocument{
 		Schema:   "dotpkg.plan",
 		Version:  1,
@@ -79,6 +89,10 @@ func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Opti
 		Profile:  options.Profile,
 		Host:     options.HostLabel,
 		Stages:   []PlanStage{planStage("packages", packagePlan.Declared, packagePlan.Adopted, packagePlan.Missing, packagePlan.Extra, "install")},
+	}
+	if len(appImagePlans) > 0 {
+		plan := appImagePlans[0]
+		document.Stages = append(document.Stages, planStage("appimages", plan.Declared, plan.Adopted, plan.Missing, plan.Extra, "install"))
 	}
 	if document.Host == "" {
 		document.Host = options.HostPath
@@ -347,7 +361,7 @@ func DeclaredPackages(m *manifest.Manifest, categories []string) []string {
 }
 
 func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, profile string, system backend.Backend) (Plan, error) {
-	declared := DeclaredPackages(m, PackageCategories(m, profile, true, s))
+	declared := packageManagerPackages(m, profile, s)
 	tracked := s.Packages()
 	trackedSet := make(map[string]struct{}, len(tracked))
 	for _, packageName := range tracked {
@@ -380,6 +394,114 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, profil
 	sort.Strings(plan.Missing)
 	sort.Strings(plan.Extra)
 	return plan, nil
+}
+
+func packageManagerPackages(m *manifest.Manifest, profile string, s *state.State) []string {
+	declared := DeclaredPackages(m, PackageCategories(m, profile, true, s))
+	result := make([]string, 0, len(declared))
+	for _, packageName := range declared {
+		if _, appImage := m.AppImage(packageName); !appImage {
+			result = append(result, packageName)
+		}
+	}
+	return result
+}
+
+func BuildAppImagePlan(ctx context.Context, m *manifest.Manifest, s *state.State, profile string, system appimage.System) (AppImagePlan, error) {
+	paths := PackageCategories(m, profile, true, s)
+	declaredSpecs := m.AppImages(paths)
+	plan := AppImagePlan{
+		Plan:      Plan{Declared: make([]string, 0, len(declaredSpecs))},
+		Specs:     make(map[string]appimage.Spec, len(declaredSpecs)),
+		Artifacts: make(map[string]appimage.Artifact, len(declaredSpecs)),
+		Records:   make(map[string]appimage.Record, len(declaredSpecs)),
+		Previous:  make(map[string]appimage.Record),
+	}
+	tracked := s.AppImages()
+	trackedSet := make(map[string]struct{}, len(tracked))
+	for name, record := range tracked {
+		trackedSet[name] = struct{}{}
+		plan.Previous[name] = stateAppImageRecord(name, record)
+	}
+	for _, spec := range declaredSpecs {
+		plan.Declared = append(plan.Declared, spec.Name)
+		plan.Specs[spec.Name] = appimage.Spec(spec)
+		artifact, err := system.Resolve(ctx, appimage.Spec(spec))
+		if err != nil {
+			return plan, err
+		}
+		plan.Artifacts[spec.Name] = artifact
+		target, err := system.Target(appimage.Spec(spec))
+		if err != nil {
+			return plan, err
+		}
+		record := appimage.Record{
+			Name:      spec.Name,
+			Address:   artifact.Address,
+			Target:    target,
+			Algorithm: artifact.Algorithm,
+			Digest:    artifact.Digest,
+			Version:   artifact.Version,
+		}
+		plan.Records[spec.Name] = record
+		installed, err := system.Installed(ctx, record)
+		if err != nil {
+			return plan, err
+		}
+		if installed {
+			previous, tracked := tracked[spec.Name]
+			if !tracked {
+				plan.Adopted = append(plan.Adopted, spec.Name)
+			} else if previous.Address != artifact.Address || previous.Digest != artifact.Digest || previous.Algorithm != artifact.Algorithm || previous.Target != record.Target {
+				plan.Adopted = append(plan.Adopted, spec.Name)
+			}
+			continue
+		}
+		plan.Missing = append(plan.Missing, spec.Name)
+	}
+	declaredSet := make(map[string]struct{}, len(plan.Declared))
+	for _, name := range plan.Declared {
+		declaredSet[name] = struct{}{}
+	}
+	for name := range tracked {
+		if _, declared := declaredSet[name]; !declared {
+			plan.Extra = append(plan.Extra, name)
+		}
+	}
+	sort.Strings(plan.Declared)
+	sort.Strings(plan.Adopted)
+	sort.Strings(plan.Missing)
+	sort.Strings(plan.Extra)
+	return plan, nil
+}
+
+func BuildAppImageCleanPlan(m *manifest.Manifest, s *state.State, profile string) AppImagePlan {
+	declared := m.AppImages(PackageCategories(m, profile, true, s))
+	plan := AppImagePlan{
+		Plan:      Plan{Declared: make([]string, 0, len(declared))},
+		Previous:  make(map[string]appimage.Record),
+		Specs:     make(map[string]appimage.Spec),
+		Artifacts: make(map[string]appimage.Artifact),
+	}
+	for _, spec := range declared {
+		plan.Declared = append(plan.Declared, spec.Name)
+		plan.Specs[spec.Name] = appimage.Spec(spec)
+	}
+	for name, record := range s.AppImages() {
+		plan.Previous[name] = stateAppImageRecord(name, record)
+	}
+	declaredSet := make(map[string]struct{}, len(plan.Declared))
+	for _, name := range plan.Declared {
+		declaredSet[name] = struct{}{}
+	}
+	for name := range plan.Previous {
+		if _, ok := declaredSet[name]; !ok {
+			plan.Extra = append(plan.Extra, name)
+		}
+	}
+	sort.Strings(plan.Declared)
+	sort.Strings(plan.Extra)
+	return plan
 }
 
 func Sync(ctx context.Context, options Options, system backend.Backend) error {
@@ -419,7 +541,11 @@ func Recover(ctx context.Context, options Options, system backend.Backend) error
 			return nil
 		}
 	}
-	if err := rollback(ctx, system, journal); err != nil {
+	appSystem, err := appImageBackend(normalized)
+	if err != nil {
+		return err
+	}
+	if err := rollback(ctx, system, appSystem, journal); err != nil {
 		return fmt.Errorf("recovery failed; journal retained: %w", err)
 	}
 	return recovery.Clear(normalized.StatePath)
@@ -430,16 +556,17 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 	if err != nil {
 		return err
 	}
-	declared := DeclaredPackages(m, PackageCategories(m, options.Profile, true, s))
+	declared := packageManagerPackages(m, options.Profile, s)
 	packagePlan := Plan{Declared: declared, Extra: subtract(s.Packages(), declared)}
+	appImagePlan := BuildAppImageCleanPlan(m, s, options.Profile)
 	var resourcePlan *resource.Plan
 	if options.Resources {
 		resourceOptions := resource.Options{Profile: options.Profile, RootPath: options.RootPath, Output: options.Output}
 		planned := resource.CleanPlan(m, s, resourceOptions)
 		resourcePlan = &planned
 	}
-	printPlan(options.Output, packagePlan, options.OutputFormat, resourcePlan, options)
-	changes := len(packagePlan.Extra)
+	printPlan(options.Output, packagePlan, options.OutputFormat, resourcePlan, options, appImagePlan)
+	changes := len(packagePlan.Extra) + len(appImagePlan.Extra)
 	if resourcePlan != nil {
 		changes += resourcePlan.Changes()
 	}
@@ -465,15 +592,34 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 		return err
 	}
 	journal := recovery.New(options.StatePath, options.Profile, recovery.Packages{}, packageGroupFromState(packagePlan.Extra, oldOrigins, m))
-	if len(packagePlan.Extra) > 0 {
+	for _, name := range appImagePlan.Extra {
+		journal.AppImages.Removed = append(journal.AppImages.Removed, recoveryAppImageRecord(appImagePlan.Previous[name]))
+	}
+	var appSystem appimage.System
+	if len(appImagePlan.Extra) > 0 {
+		appSystem, err = appImageBackend(options)
+		if err != nil {
+			return err
+		}
+	}
+	if len(packagePlan.Extra) > 0 || len(appImagePlan.Extra) > 0 {
 		if err := journal.Write(); err != nil {
 			return err
 		}
 	}
 	if len(packagePlan.Extra) > 0 {
 		if err := system.Remove(ctx, packagePlan.Extra, options.Profile); err != nil {
-			return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+			return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
+	}
+	if len(appImagePlan.Extra) > 0 {
+		for _, name := range appImagePlan.Extra {
+			if err := appSystem.Remove(ctx, appImagePlan.Previous[name]); err != nil {
+				return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+			}
+		}
+	}
+	if len(packagePlan.Extra) > 0 {
 		s.SetPackages(subtract(s.Packages(), packagePlan.Extra))
 		origins := s.PackageOrigins()
 		for _, packageName := range packagePlan.Extra {
@@ -481,8 +627,18 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 		}
 		s.SetPackageOrigins(origins)
 		setCurrentState(s, m, options)
+	}
+	if len(appImagePlan.Extra) > 0 {
+		images := s.AppImages()
+		for _, name := range appImagePlan.Extra {
+			delete(images, name)
+		}
+		s.SetAppImages(images)
+	}
+	if len(packagePlan.Extra) > 0 || len(appImagePlan.Extra) > 0 {
+		setCurrentState(s, m, options)
 		if err := s.Write(); err != nil {
-			return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+			return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
 	}
 	if resourcePlan != nil && resourcePlan.Changes() > 0 {
@@ -496,13 +652,13 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 			RootPath: options.RootPath,
 			Output:   options.Output,
 		}, resourceSystem); err != nil {
-			if len(packagePlan.Extra) > 0 {
-				return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+			if len(packagePlan.Extra) > 0 || len(appImagePlan.Extra) > 0 {
+				return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
 			}
 			return err
 		}
 	}
-	if len(packagePlan.Extra) > 0 {
+	if len(packagePlan.Extra) > 0 || len(appImagePlan.Extra) > 0 {
 		journal.Completed = true
 		if err := journal.Write(); err != nil {
 			return fmt.Errorf("complete recovery journal: %w", err)
@@ -544,6 +700,14 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	if err != nil {
 		return err
 	}
+	appSystem, err := appImageBackend(options)
+	if err != nil {
+		return err
+	}
+	appImagePlan, err := BuildAppImagePlan(ctx, m, s, options.Profile, appSystem)
+	if err != nil {
+		return err
+	}
 	var resourcePlan *resource.Plan
 	if options.Resources && options.OutputFormat == "json" {
 		resourceSystem, resourceErr := resourceBackend(options, system)
@@ -560,10 +724,10 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		}
 		resourcePlan = &planned
 	}
-	printPlan(options.Output, plan, options.OutputFormat, resourcePlan, options)
-	if plan.Changes() == 0 {
+	printPlan(options.Output, plan, options.OutputFormat, resourcePlan, options, appImagePlan)
+	if plan.Changes() == 0 && appImagePlan.Changes() == 0 {
 		if options.OutputFormat == "text" {
-			fmt.Fprintln(options.Output, "packages: already synchronized")
+			fmt.Fprintln(options.Output, "packages and AppImages: already synchronized")
 		}
 		if !options.Resources {
 			return nil
@@ -574,7 +738,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	}
 	apply := options.Yes
 	if !options.Yes {
-		apply, err = askSelection(options, "Apply packages changes? [y/N] ", false)
+		apply, err = askSelection(options, "Apply package and AppImage changes? [y/N] ", false)
 		if err != nil {
 			return err
 		}
@@ -596,17 +760,42 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		packageGroup(repository, aur, nil),
 		packageGroupFromState(plan.Extra, oldOrigins, m),
 	)
+	for _, name := range appImagePlan.Missing {
+		journal.AppImages.Installed = append(journal.AppImages.Installed, recoveryAppImageRecord(appImagePlan.Records[name]))
+		if previous, ok := appImagePlan.Previous[name]; ok {
+			journal.AppImages.Removed = append(journal.AppImages.Removed, recoveryAppImageRecord(previous))
+		}
+	}
+	for _, name := range appImagePlan.Extra {
+		journal.AppImages.Removed = append(journal.AppImages.Removed, recoveryAppImageRecord(appImagePlan.Previous[name]))
+	}
 	packageChanges := len(plan.Missing) + len(plan.Extra)
-	if packageChanges > 0 {
+	appImageChanges := appImagePlan.Changes()
+	if packageChanges > 0 || appImageChanges > 0 {
 		if err := journal.Write(); err != nil {
 			return err
 		}
 	}
 	if err := system.Install(ctx, repository, aur, options.Profile); err != nil {
-		return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+		return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
 	}
 	if err := system.Remove(ctx, plan.Extra, options.Profile); err != nil {
-		return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+		return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+	}
+	for _, name := range appImagePlan.Missing {
+		if _, err := appSystem.Install(ctx, appImagePlan.Specs[name], appImagePlan.Artifacts[name]); err != nil {
+			return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+		}
+		if previous, ok := appImagePlan.Previous[name]; ok && previous.Target != appImagePlan.Records[name].Target {
+			if err := appSystem.Remove(ctx, previous); err != nil {
+				return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+			}
+		}
+	}
+	for _, name := range appImagePlan.Extra {
+		if err := appSystem.Remove(ctx, appImagePlan.Previous[name]); err != nil {
+			return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+		}
 	}
 	tracked := append([]string{}, s.Packages()...)
 	tracked = subtract(tracked, plan.Extra)
@@ -623,17 +812,31 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		}
 	}
 	s.SetPackageOrigins(origins)
+	images := s.AppImages()
+	for _, name := range appImagePlan.Extra {
+		delete(images, name)
+	}
+	for _, name := range append(append([]string{}, appImagePlan.Adopted...), appImagePlan.Missing...) {
+		images[name] = state.AppImage{
+			Address:   appImagePlan.Records[name].Address,
+			Target:    appImagePlan.Records[name].Target,
+			Algorithm: appImagePlan.Records[name].Algorithm,
+			Digest:    appImagePlan.Records[name].Digest,
+			Version:   appImagePlan.Records[name].Version,
+		}
+	}
+	s.SetAppImages(images)
 	setCurrentState(s, m, options)
 	if err := s.Write(); err != nil {
-		return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+		return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
 	}
 	if err := syncResources(ctx, m, s, options, system); err != nil {
-		if packageChanges > 0 {
-			return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+		if packageChanges > 0 || appImageChanges > 0 {
+			return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
 		return err
 	}
-	if packageChanges > 0 {
+	if packageChanges > 0 || appImageChanges > 0 {
 		journal.Completed = true
 		if err := journal.Write(); err != nil {
 			return fmt.Errorf("complete recovery journal: %w", err)
@@ -647,6 +850,39 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 
 func packageGroup(repository, aur, unknown []string) recovery.Packages {
 	return recovery.Packages{Repository: append([]string{}, repository...), AUR: append([]string{}, aur...), Unknown: append([]string{}, unknown...)}
+}
+
+func stateAppImageRecord(name string, image state.AppImage) appimage.Record {
+	return appimage.Record{
+		Name:      name,
+		Address:   image.Address,
+		Target:    image.Target,
+		Algorithm: image.Algorithm,
+		Digest:    image.Digest,
+		Version:   image.Version,
+	}
+}
+
+func recoveryAppImageRecord(record appimage.Record) recovery.AppImage {
+	return recovery.AppImage{
+		Name:      record.Name,
+		Address:   record.Address,
+		Target:    record.Target,
+		Algorithm: record.Algorithm,
+		Digest:    record.Digest,
+		Version:   record.Version,
+	}
+}
+
+func appImageRecordFromRecovery(record recovery.AppImage) appimage.Record {
+	return appimage.Record{
+		Name:      record.Name,
+		Address:   record.Address,
+		Target:    record.Target,
+		Algorithm: record.Algorithm,
+		Digest:    record.Digest,
+		Version:   record.Version,
+	}
 }
 
 func packageGroupFromState(packages []string, origins map[string]string, m *manifest.Manifest) recovery.Packages {
@@ -668,8 +904,8 @@ func packageGroupFromState(packages []string, origins map[string]string, m *mani
 	return packageGroup(repository, aur, unknown)
 }
 
-func packageFailure(original error, ctx context.Context, system backend.Backend, journal recovery.Journal, s *state.State, oldState map[string]any, oldPackages []string, oldOrigins map[string]string) error {
-	rollbackErr := rollback(ctx, system, journal)
+func packageFailure(original error, ctx context.Context, system backend.Backend, appSystem appimage.System, journal recovery.Journal, s *state.State, oldState map[string]any, oldPackages []string, oldOrigins map[string]string) error {
+	rollbackErr := rollback(ctx, system, appSystem, journal)
 	s.Restore(oldState)
 	s.SetPackages(oldPackages)
 	s.SetPackageOrigins(oldOrigins)
@@ -683,7 +919,7 @@ func packageFailure(original error, ctx context.Context, system backend.Backend,
 	return original
 }
 
-func rollback(ctx context.Context, system backend.Backend, journal recovery.Journal) error {
+func rollback(ctx context.Context, system backend.Backend, appSystem appimage.System, journal recovery.Journal) error {
 	var errorsFound []string
 	var installed []string
 	for _, packageName := range append(append([]string{}, journal.Installed.Repository...), journal.Installed.AUR...) {
@@ -708,10 +944,39 @@ func rollback(ctx context.Context, system backend.Backend, journal recovery.Jour
 			errorsFound = append(errorsFound, fmt.Sprintf("restore removed packages: %v", err))
 		}
 	}
+	if appSystem != nil {
+		for _, record := range journal.AppImages.Installed {
+			appRecord := appImageRecordFromRecovery(record)
+			present, err := appSystem.Installed(ctx, appRecord)
+			if err != nil {
+				errorsFound = append(errorsFound, fmt.Sprintf("check newly installed AppImage %s: %v", record.Name, err))
+			} else if present {
+				err = appSystem.Remove(ctx, appRecord)
+			}
+			if err != nil {
+				errorsFound = append(errorsFound, fmt.Sprintf("remove newly installed AppImage %s: %v", record.Name, err))
+			}
+		}
+		for _, record := range journal.AppImages.Removed {
+			appRecord := appImageRecordFromRecovery(record)
+			spec := appimage.Spec{Name: appRecord.Name, Address: appRecord.Address, Target: appRecord.Target}
+			artifact := appimage.Artifact{Address: appRecord.Address, Algorithm: appRecord.Algorithm, Digest: appRecord.Digest, Version: appRecord.Version}
+			if _, err := appSystem.Install(ctx, spec, artifact); err != nil {
+				errorsFound = append(errorsFound, fmt.Sprintf("restore removed AppImage %s: %v", record.Name, err))
+			}
+		}
+	}
 	if len(errorsFound) > 0 {
 		return errors.New(strings.Join(errorsFound, "; "))
 	}
 	return nil
+}
+
+func appImageBackend(options Options) (appimage.System, error) {
+	if options.AppImageSystem != nil {
+		return options.AppImageSystem, nil
+	}
+	return appimage.New(), nil
 }
 
 func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system backend.Backend) error {
@@ -763,9 +1028,13 @@ func setCurrentState(s *state.State, m *manifest.Manifest, options Options) {
 	s.Set(m.Digest(), "current", "manifest_sha256")
 }
 
-func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resource.Plan, options Options) {
+func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resource.Plan, options Options, appImagePlans ...AppImagePlan) {
 	if format == "json" {
-		_ = json.NewEncoder(output).Encode(NewPlanDocument(plan, resourcePlan, options))
+		if len(appImagePlans) > 0 {
+			_ = json.NewEncoder(output).Encode(NewPlanDocument(plan, resourcePlan, options, appImagePlans[0]))
+		} else {
+			_ = json.NewEncoder(output).Encode(NewPlanDocument(plan, resourcePlan, options))
+		}
 		return
 	}
 	fmt.Fprintln(output, "PACKAGES")
@@ -777,6 +1046,21 @@ func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resourc
 	}
 	for _, packageName := range plan.Extra {
 		fmt.Fprintf(output, "  - remove: %s\n", packageName)
+	}
+	if len(appImagePlans) > 0 {
+		appPlan := appImagePlans[0]
+		if appPlan.Changes() > 0 {
+			fmt.Fprintln(output, "APPIMAGES")
+			for _, name := range appPlan.Adopted {
+				fmt.Fprintf(output, "  ~ adopt: %s\n", name)
+			}
+			for _, name := range appPlan.Missing {
+				fmt.Fprintf(output, "  + install: %s\n", name)
+			}
+			for _, name := range appPlan.Extra {
+				fmt.Fprintf(output, "  - remove: %s\n", name)
+			}
+		}
 	}
 	if resourcePlan != nil {
 		for _, stage := range []struct {
@@ -802,6 +1086,8 @@ func splitByOrigin(m *manifest.Manifest, packages []string) ([]string, []string,
 	var repository, aur []string
 	for _, packageName := range packages {
 		switch m.PackageOrigin(packageName) {
+		case "appimage":
+			continue
 		case "repo":
 			repository = append(repository, packageName)
 		case "aur":
@@ -841,6 +1127,8 @@ func Validate(ctx context.Context, m *manifest.Manifest, profile string, extra [
 	validation := Validation{Packages: packages}
 	for _, packageName := range packages {
 		switch m.PackageOrigin(packageName) {
+		case "appimage":
+			continue
 		case "repo":
 			validation.Repo = append(validation.Repo, packageName)
 		case "aur":

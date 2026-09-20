@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -164,7 +165,7 @@ func validatePackageSection(value any, path string) error {
 }
 
 func isMetadataMapping(value map[string]any) bool {
-	for _, key := range []string{"source", "groups", "configs", "services", "install"} {
+	for _, key := range []string{"source", "address", "target", "groups", "configs", "services", "install"} {
 		if _, ok := value[key]; ok {
 			return true
 		}
@@ -193,12 +194,17 @@ func validatePackageValue(value any, path string) error {
 	if !ok {
 		return fmt.Errorf("%s must be a package metadata mapping or null", path)
 	}
+	source, _ := mapping["source"].(string)
 	for key, child := range mapping {
 		fieldPath := path + "." + key
 		switch key {
 		case "source":
 			if err := validateSource(child, fieldPath); err != nil {
 				return err
+			}
+		case "address", "target":
+			if text, ok := child.(string); !ok || strings.TrimSpace(text) == "" {
+				return fmt.Errorf("%s must be a non-empty string", fieldPath)
 			}
 		case "groups":
 			if err := validateStringList(child, fieldPath); err != nil {
@@ -215,6 +221,21 @@ func validatePackageValue(value any, path string) error {
 		case "install":
 			if _, ok := child.(bool); !ok {
 				return fmt.Errorf("%s must be a boolean", fieldPath)
+			}
+		}
+	}
+	if source == "appimage" {
+		address, ok := mapping["address"].(string)
+		if !ok || strings.TrimSpace(address) == "" {
+			return fmt.Errorf("%s.address is required for AppImage packages", path)
+		}
+		parsed, err := url.Parse(address)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+			return fmt.Errorf("%s.address must be an HTTPS URL", path)
+		}
+		for _, segment := range strings.Split(strings.Trim(parsed.Path, "/"), "/") {
+			if strings.EqualFold(segment, "latest") {
+				return fmt.Errorf("%s.address must pin a release, not latest", path)
 			}
 		}
 	}
@@ -397,10 +418,69 @@ func validateStringList(value any, path string) error {
 
 func validateSource(value any, path string) error {
 	source, ok := value.(string)
-	if !ok || (source != "repo" && source != "aur") {
-		return fmt.Errorf("%s must be repo or aur", path)
+	if !ok || (source != "repo" && source != "aur" && source != "appimage") {
+		return fmt.Errorf("%s must be repo, aur, or appimage", path)
 	}
 	return nil
+}
+
+// AppImageSpec is the manifest metadata needed to install one AppImage.
+type AppImageSpec struct {
+	Name    string
+	Address string
+	Target  string
+}
+
+// AppImage returns the AppImage metadata attached to a package node.
+func (m *Manifest) AppImage(name string) (AppImageSpec, bool) {
+	var result AppImageSpec
+	found := false
+	var walk func(any)
+	walk = func(value any) {
+		if found {
+			return
+		}
+		mapping, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		if packageValue, exists := mapping[name]; exists {
+			if metadata, ok := packageValue.(map[string]any); ok {
+				if source, _ := metadata["source"].(string); source == "appimage" {
+					address, addressOK := metadata["address"].(string)
+					if addressOK && address != "" {
+						result = AppImageSpec{Name: name, Address: address}
+						result.Target, _ = metadata["target"].(string)
+						found = true
+					}
+				}
+			}
+		}
+		for _, child := range mapping {
+			walk(child)
+		}
+	}
+	walk(m.Data)
+	return result, found
+}
+
+// AppImages returns AppImage package nodes declared in the selected paths.
+func (m *Manifest) AppImages(paths []string) []AppImageSpec {
+	var result []AppImageSpec
+	seen := make(map[string]struct{})
+	for _, path := range paths {
+		for _, name := range m.PackageNames(path) {
+			if _, already := seen[name]; already {
+				continue
+			}
+			if spec, ok := m.AppImage(name); ok {
+				result = append(result, spec)
+				seen[name] = struct{}{}
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result
 }
 
 func (m *Manifest) Source() string {

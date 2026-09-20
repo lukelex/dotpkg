@@ -118,8 +118,9 @@ profiles:
           i3:
 ```
 
-Package metadata can declare `source: repo|aur`, group membership, config
-links, and services. A host file supplied with `--host PATH` is deep-merged
+Package metadata can declare `source: repo|aur|appimage`, group membership, config
+links, and services. AppImage nodes use `source: appimage` with an HTTPS
+`address`; their integrity metadata is resolved automatically. A host file supplied with `--host PATH` is deep-merged
 over the manifest. Use `--manifest PATH` or `DOTPKG_MANIFEST=PATH` to select
 the manifest; resource paths resolve relative to its directory unless
 `--root PATH` is supplied.
@@ -178,6 +179,14 @@ Existing conflicting targets are preserved unless `--replace` is supplied.
 System services use `sudo`; user services are tracked separately. Config-linked
 services are restarted only with the explicit `--restart-services` flag, and
 systemd daemon reloads are performed when unit files change.
+
+AppImages are handled as a separate managed artifact stage rather than passed
+to `pacman`, `apt`, or `dnf`. The node supplies an HTTPS `address`; a checksum
+does not need to be written manually. GitHub release assets use their published
+SHA256 digest, while other hosts must expose a `.sha256`/`.sha256sum` sidecar
+or `.zsync` metadata. Version-pinned addresses are required and `latest` is
+rejected. The default target is `$HOME/.local/bin/<node-name>`; explicit
+targets must stay inside the user home directory.
 
 ## State, recovery, and compatibility
 

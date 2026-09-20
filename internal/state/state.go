@@ -17,6 +17,14 @@ type State struct {
 	Data     map[string]any
 }
 
+type AppImage struct {
+	Address   string
+	Target    string
+	Algorithm string
+	Digest    string
+	Version   string
+}
+
 const CurrentVersion = 1
 
 func Load(path string) (*State, error) {
@@ -95,6 +103,10 @@ func migrate(data map[string]any) (bool, error) {
 		managed["package_origins"] = map[string]any{}
 		migrated = true
 	}
+	if _, ok := managed["appimages"]; !ok {
+		managed["appimages"] = map[string]any{}
+		migrated = true
+	}
 	data["version"] = CurrentVersion
 	return migrated, nil
 }
@@ -156,6 +168,26 @@ func validate(data map[string]any) error {
 			}
 		}
 	}
+	if appimages, exists := managedMap["appimages"]; exists {
+		appimageMap, ok := appimages.(map[string]any)
+		if !ok {
+			return fmt.Errorf("managed.appimages must be a mapping")
+		}
+		for name, value := range appimageMap {
+			if name == "" {
+				return fmt.Errorf("managed.appimages contains an empty name")
+			}
+			mapping, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("managed.appimages.%s must be a mapping", name)
+			}
+			for _, field := range []string{"address", "target", "algorithm", "digest"} {
+				if text, ok := mapping[field].(string); !ok || text == "" {
+					return fmt.Errorf("managed.appimages.%s.%s must be a non-empty string", name, field)
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -179,6 +211,7 @@ func defaultData() map[string]any {
 		"managed": map[string]any{
 			"packages":        []any{},
 			"package_origins": map[string]any{},
+			"appimages":       map[string]any{},
 			"groups":          []any{},
 			"configs":         []any{},
 			"services":        []any{},
@@ -257,6 +290,52 @@ func (s *State) SetPackageOrigins(origins map[string]string) {
 		}
 	}
 	s.Set(values, "managed", "package_origins")
+}
+
+func (s *State) AppImages() map[string]AppImage {
+	value, ok := s.Get("managed", "appimages")
+	if !ok {
+		return map[string]AppImage{}
+	}
+	mapping, ok := value.(map[string]any)
+	if !ok {
+		return map[string]AppImage{}
+	}
+	result := make(map[string]AppImage, len(mapping))
+	for name, value := range mapping {
+		fields, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		record := AppImage{}
+		record.Address, _ = fields["address"].(string)
+		record.Target, _ = fields["target"].(string)
+		record.Algorithm, _ = fields["algorithm"].(string)
+		record.Digest, _ = fields["digest"].(string)
+		record.Version, _ = fields["version"].(string)
+		result[name] = record
+	}
+	return result
+}
+
+func (s *State) SetAppImages(images map[string]AppImage) {
+	values := make(map[string]any, len(images))
+	for name, image := range images {
+		if name == "" || image.Address == "" || image.Target == "" || image.Algorithm == "" || image.Digest == "" {
+			continue
+		}
+		value := map[string]any{
+			"address":   image.Address,
+			"target":    image.Target,
+			"algorithm": image.Algorithm,
+			"digest":    image.Digest,
+		}
+		if image.Version != "" {
+			value["version"] = image.Version
+		}
+		values[name] = value
+	}
+	s.Set(values, "managed", "appimages")
 }
 
 func (s *State) Items(path ...string) []string {
