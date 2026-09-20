@@ -49,6 +49,7 @@ dotpkg plan --manifest packages.yaml --profile desktop --state-file state.yaml
 dotpkg diff --manifest packages.yaml --profile desktop --resources
 dotpkg sync --manifest packages.yaml --profile desktop --state-file state.yaml
 dotpkg clean --manifest packages.yaml --profile desktop --yes
+dotpkg recover --state-file state.yaml --yes
 dotpkg add lm_sensors --manifest packages.yaml --scope desktop
 dotpkg doctor --manifest packages.yaml --profile desktop
 dotpkg completion --shell bash > dotpkg.bash
@@ -76,6 +77,11 @@ never installs or adopts anything and prompts unless `--yes` is supplied.
 `diff` is a read-only alias for `plan`. Completion scripts are available for
 Bash, Zsh, and Fish.
 
+Package-changing operations write a crash-recovery journal next to the state
+file and attempt compensating package operations if installation, removal, or
+the subsequent sync fails. Run `recover` when a journal remains after an
+interrupted process. State writes keep the previous file at `state.yaml.bak`.
+
 `doctor` is read-only. It checks package installation and availability, state
 validity, config links and sources, group membership, services, and backend
 support. It exits nonzero when it finds errors. Use `--output json` for a
@@ -84,8 +90,10 @@ machine-readable report. Commands have a 10-minute timeout by default; use
 `--backend-timeout`, `--aur-retries`, and `--aur-retry-delay`; `--verbose`
 prints retry diagnostics.
 
-The backend factory defaults to Arch. `DOTPKG_BACKEND=arch` is explicit today;
-the variable provides the extension point for future distribution backends.
+The backend factory defaults to Arch. Select the other supported package
+managers explicitly with `DOTPKG_BACKEND=debian` or `DOTPKG_BACKEND=fedora`.
+`DOTPKG_BACKEND=arch` is also accepted explicitly. AUR packages are rejected
+by the Debian and Fedora backends.
 
 ## Custom resources
 

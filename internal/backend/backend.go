@@ -46,7 +46,11 @@ func New() (Backend, error) {
 	switch name {
 	case "arch", "archlinux":
 		return NewArch(), nil
+	case "debian", "ubuntu":
+		return NewDebian(), nil
+	case "fedora", "rhel":
+		return NewFedora(), nil
 	default:
-		return nil, fmt.Errorf("unsupported package backend %q (supported: arch)", name)
+		return nil, fmt.Errorf("unsupported package backend %q (supported: arch, debian, fedora)", name)
 	}
 }

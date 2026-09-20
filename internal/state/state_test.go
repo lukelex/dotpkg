@@ -3,6 +3,7 @@ package state
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -73,5 +74,50 @@ func TestStateValidationRejectsMalformedManagedList(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "managed.packages") {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestStateMigrationAddsVersionedManagedShape(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	if err := os.WriteFile(path, []byte("managed:\n  packages:\n    - git\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s.Migrated || s.Data["version"] != CurrentVersion {
+		t.Fatalf("migration state = %#v", s.Data)
+	}
+	if err := s.Write(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path + ".bak"); err != nil {
+		t.Fatalf("backup error = %v", err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(loaded.Packages(), ","); got != "git" {
+		t.Fatalf("migrated packages = %q", got)
+	}
+}
+
+func TestStatePackageOriginsRoundTrip(t *testing.T) {
+	s, err := Load(filepath.Join(t.TempDir(), "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetPackageOrigins(map[string]string{"git": "repo", "yay-tool": "aur"})
+	if err := s.Write(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(s.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.PackageOrigins(); !reflect.DeepEqual(got, map[string]string{"git": "repo", "yay-tool": "aur"}) {
+		t.Fatalf("origins = %#v", got)
 	}
 }

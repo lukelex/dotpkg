@@ -14,6 +14,7 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
+	"github.com/lukelex/dotpkg/internal/recovery"
 	"github.com/lukelex/dotpkg/internal/resource"
 	"github.com/lukelex/dotpkg/internal/state"
 )
@@ -393,6 +394,37 @@ func Clean(ctx context.Context, options Options, system backend.Backend) error {
 	})
 }
 
+func Recover(ctx context.Context, options Options, system backend.Backend) error {
+	normalized, err := options.normalize()
+	if err != nil {
+		return err
+	}
+	journal, err := recovery.Load(normalized.StatePath)
+	if errors.Is(err, os.ErrNotExist) {
+		fmt.Fprintln(normalized.Output, "recovery: no pending package transaction")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if journal.Completed {
+		return recovery.Clear(normalized.StatePath)
+	}
+	if !normalized.Yes {
+		apply, askErr := askSelection(normalized, "Rollback the recorded package transaction? [y/N] ", false)
+		if askErr != nil {
+			return askErr
+		}
+		if !apply {
+			return nil
+		}
+	}
+	if err := rollback(ctx, system, journal); err != nil {
+		return fmt.Errorf("recovery failed; journal retained: %w", err)
+	}
+	return recovery.Clear(normalized.StatePath)
+}
+
 func cleanLocked(ctx context.Context, options Options, system backend.Backend) error {
 	m, s, options, err := Load(options)
 	if err != nil {
@@ -426,14 +458,31 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 			return nil
 		}
 	}
+	oldPackages := append([]string{}, s.Packages()...)
+	oldOrigins := s.PackageOrigins()
+	oldState, err := s.Snapshot()
+	if err != nil {
+		return err
+	}
+	journal := recovery.New(options.StatePath, options.Profile, recovery.Packages{}, packageGroupFromState(packagePlan.Extra, oldOrigins, m))
 	if len(packagePlan.Extra) > 0 {
-		if err := system.Remove(ctx, packagePlan.Extra, options.Profile); err != nil {
+		if err := journal.Write(); err != nil {
 			return err
 		}
+	}
+	if len(packagePlan.Extra) > 0 {
+		if err := system.Remove(ctx, packagePlan.Extra, options.Profile); err != nil {
+			return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+		}
 		s.SetPackages(subtract(s.Packages(), packagePlan.Extra))
+		origins := s.PackageOrigins()
+		for _, packageName := range packagePlan.Extra {
+			delete(origins, packageName)
+		}
+		s.SetPackageOrigins(origins)
 		setCurrentState(s, m, options)
 		if err := s.Write(); err != nil {
-			return err
+			return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
 		}
 	}
 	if resourcePlan != nil && resourcePlan.Changes() > 0 {
@@ -447,6 +496,18 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 			RootPath: options.RootPath,
 			Output:   options.Output,
 		}, resourceSystem); err != nil {
+			if len(packagePlan.Extra) > 0 {
+				return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+			}
+			return err
+		}
+	}
+	if len(packagePlan.Extra) > 0 {
+		journal.Completed = true
+		if err := journal.Write(); err != nil {
+			return fmt.Errorf("complete recovery journal: %w", err)
+		}
+		if err := recovery.Clear(options.StatePath); err != nil {
 			return err
 		}
 	}
@@ -525,22 +586,132 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	if err != nil {
 		return err
 	}
-	if err := system.Install(ctx, repository, aur, options.Profile); err != nil {
+	oldPackages := append([]string{}, s.Packages()...)
+	oldOrigins := s.PackageOrigins()
+	oldState, err := s.Snapshot()
+	if err != nil {
 		return err
 	}
+	journal := recovery.New(options.StatePath, options.Profile,
+		packageGroup(repository, aur, nil),
+		packageGroupFromState(plan.Extra, oldOrigins, m),
+	)
+	packageChanges := len(plan.Missing) + len(plan.Extra)
+	if packageChanges > 0 {
+		if err := journal.Write(); err != nil {
+			return err
+		}
+	}
+	if err := system.Install(ctx, repository, aur, options.Profile); err != nil {
+		return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+	}
 	if err := system.Remove(ctx, plan.Extra, options.Profile); err != nil {
-		return err
+		return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
 	}
 	tracked := append([]string{}, s.Packages()...)
 	tracked = subtract(tracked, plan.Extra)
 	tracked = append(tracked, plan.Adopted...)
 	tracked = append(tracked, plan.Missing...)
 	s.SetPackages(tracked)
+	origins := s.PackageOrigins()
+	for _, packageName := range plan.Extra {
+		delete(origins, packageName)
+	}
+	for _, packageName := range tracked {
+		if origin := m.PackageOrigin(packageName); origin == "repo" || origin == "aur" {
+			origins[packageName] = origin
+		}
+	}
+	s.SetPackageOrigins(origins)
 	setCurrentState(s, m, options)
 	if err := s.Write(); err != nil {
+		return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+	}
+	if err := syncResources(ctx, m, s, options, system); err != nil {
+		if packageChanges > 0 {
+			return packageFailure(err, ctx, system, journal, s, oldState, oldPackages, oldOrigins)
+		}
 		return err
 	}
-	return syncResources(ctx, m, s, options, system)
+	if packageChanges > 0 {
+		journal.Completed = true
+		if err := journal.Write(); err != nil {
+			return fmt.Errorf("complete recovery journal: %w", err)
+		}
+		if err := recovery.Clear(options.StatePath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func packageGroup(repository, aur, unknown []string) recovery.Packages {
+	return recovery.Packages{Repository: append([]string{}, repository...), AUR: append([]string{}, aur...), Unknown: append([]string{}, unknown...)}
+}
+
+func packageGroupFromState(packages []string, origins map[string]string, m *manifest.Manifest) recovery.Packages {
+	var repository, aur, unknown []string
+	for _, packageName := range packages {
+		origin := origins[packageName]
+		if origin == "" {
+			origin = m.PackageOrigin(packageName)
+		}
+		switch origin {
+		case "repo":
+			repository = append(repository, packageName)
+		case "aur":
+			aur = append(aur, packageName)
+		default:
+			unknown = append(unknown, packageName)
+		}
+	}
+	return packageGroup(repository, aur, unknown)
+}
+
+func packageFailure(original error, ctx context.Context, system backend.Backend, journal recovery.Journal, s *state.State, oldState map[string]any, oldPackages []string, oldOrigins map[string]string) error {
+	rollbackErr := rollback(ctx, system, journal)
+	s.Restore(oldState)
+	s.SetPackages(oldPackages)
+	s.SetPackageOrigins(oldOrigins)
+	stateErr := s.Write()
+	if rollbackErr != nil || stateErr != nil {
+		return fmt.Errorf("%w; recovery required (rollback=%v, state=%v)", original, rollbackErr, stateErr)
+	}
+	if err := recovery.Clear(journal.StatePath); err != nil {
+		return fmt.Errorf("%w; remove recovery journal: %v", original, err)
+	}
+	return original
+}
+
+func rollback(ctx context.Context, system backend.Backend, journal recovery.Journal) error {
+	var errorsFound []string
+	var installed []string
+	for _, packageName := range append(append([]string{}, journal.Installed.Repository...), journal.Installed.AUR...) {
+		present, err := system.IsInstalled(ctx, packageName)
+		if err != nil {
+			errorsFound = append(errorsFound, fmt.Sprintf("check installed %s: %v", packageName, err))
+		} else if present {
+			installed = append(installed, packageName)
+		}
+	}
+	installed = append(installed, journal.Installed.Unknown...)
+	if len(installed) > 0 {
+		if err := system.Remove(ctx, installed, journal.Profile); err != nil {
+			errorsFound = append(errorsFound, fmt.Sprintf("remove newly installed packages: %v", err))
+		}
+	}
+	if len(journal.Removed.Unknown) > 0 {
+		errorsFound = append(errorsFound, "cannot restore packages with unknown origins: "+strings.Join(journal.Removed.Unknown, ", "))
+	}
+	if len(journal.Removed.Repository) > 0 || len(journal.Removed.AUR) > 0 {
+		if err := system.Install(ctx, journal.Removed.Repository, journal.Removed.AUR, journal.Profile); err != nil {
+			errorsFound = append(errorsFound, fmt.Sprintf("restore removed packages: %v", err))
+		}
+	}
+	if len(errorsFound) > 0 {
+		return errors.New(strings.Join(errorsFound, "; "))
+	}
+	return nil
 }
 
 func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system backend.Backend) error {

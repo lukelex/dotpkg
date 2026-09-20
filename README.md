@@ -21,11 +21,12 @@ larger system provisioning workflows.
   resource-stage fields that dotpkg does not own.
 - **Backend isolation:** Distribution-specific behavior lives behind a backend
   factory and interface. The current Arch backend uses `pacman`, `yay`, and the
-  AUR RPC; other backends can be added without changing manifest or planning
-  logic.
+  AUR RPC; Debian/Ubuntu (`apt`) and Fedora/RHEL (`dnf`) backends are also
+  available without changing manifest or planning logic.
 - **Safe execution:** Plans can be inspected before application, updates are
   serialized with owner diagnostics, bounded by command and HTTP timeouts, and
-  the executable is built as a static per-architecture Linux binary.
+  package changes have a recovery journal, and the executable is built as a
+  static per-architecture Linux binary.
 
 The default integration owns package reconciliation plus separately tested
 groups, configuration links, and service resource stages. Package-only operation

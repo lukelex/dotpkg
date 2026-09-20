@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
+	"github.com/lukelex/dotpkg/internal/recovery"
 	"github.com/lukelex/dotpkg/internal/resource"
 	"github.com/lukelex/dotpkg/internal/state"
 )
@@ -21,6 +23,7 @@ type fakeBackend struct {
 	install       []string
 	remove        []string
 	removeProfile string
+	installErr    error
 }
 
 func TestPlanDocumentUsesVersionedUnifiedSchema(t *testing.T) {
@@ -230,6 +233,45 @@ func TestCleanRemovesOnlyManagedUndeclaredPackages(t *testing.T) {
 	}
 }
 
+func TestSyncRollsBackPartiallyInstalledPackages(t *testing.T) {
+	manifestPath := testManifest(t)
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	fake := &fakeBackend{installed: map[string]bool{}, installErr: errors.New("install failed")}
+	err := Sync(context.Background(), Options{
+		ManifestPath: manifestPath,
+		StatePath:    statePath,
+		Profile:      "desktop",
+		Yes:          true,
+	}, fake)
+	if err == nil || !strings.Contains(err.Error(), "install failed") {
+		t.Fatalf("sync error = %v", err)
+	}
+	if len(fake.remove) == 0 {
+		t.Fatal("rollback did not remove partially installed packages")
+	}
+	if _, err := os.Stat(recovery.Path(statePath)); !os.IsNotExist(err) {
+		t.Fatalf("journal error = %v", err)
+	}
+}
+
+func TestRecoverRollsBackJournalAndClearsIt(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	fake := &fakeBackend{installed: map[string]bool{"git": true}}
+	journal := recovery.New(statePath, "server", recovery.Packages{Repository: []string{"git"}}, recovery.Packages{})
+	if err := journal.Write(); err != nil {
+		t.Fatal(err)
+	}
+	if err := Recover(context.Background(), Options{StatePath: statePath, Profile: "server", Yes: true}, fake); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fake.remove, []string{"git"}) {
+		t.Fatalf("rollback removals = %#v", fake.remove)
+	}
+	if _, err := os.Stat(recovery.Path(statePath)); !os.IsNotExist(err) {
+		t.Fatalf("journal error = %v", err)
+	}
+}
+
 func TestEnsureSelectionsMatchesInteractivePromptsAndConsumesAnswers(t *testing.T) {
 	directory := t.TempDir()
 	manifestPath := filepath.Join(directory, "packages.yaml")
@@ -342,7 +384,10 @@ func (f *fakeBackend) AURPackages(_ context.Context, names []string) (map[string
 func (f *fakeBackend) Install(_ context.Context, repository, aur []string, _ string) error {
 	f.install = append(f.install, repository...)
 	f.install = append(f.install, aur...)
-	return nil
+	for _, packageName := range append(append([]string{}, repository...), aur...) {
+		f.installed[packageName] = true
+	}
+	return f.installErr
 }
 
 func (f *fakeBackend) Remove(_ context.Context, packages []string, profile string) error {

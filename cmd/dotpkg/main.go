@@ -65,6 +65,8 @@ func run(ctx context.Context, args []string) error {
 		return sync(ctx, args[1:], system, false)
 	case "clean":
 		return cleanCommand(ctx, args[1:], system)
+	case "recover":
+		return recoverCommand(ctx, args[1:], system)
 	case "add":
 		return add(ctx, args[1:], system)
 	case "doctor":
@@ -83,6 +85,7 @@ Commands:
   diff      Alias for plan, showing package and resource drift.
   sync      Reconcile declared packages and managed package state.
   clean     Remove only managed items no longer declared.
+  recover   Roll back a pending package transaction.
   add       Declare, validate, install, and track a package.
   doctor    Diagnose manifest, state, backend, and resource drift.
   completion Generate shell completion (bash, zsh, or fish).
@@ -259,6 +262,26 @@ func cleanCommand(ctx context.Context, args []string, system backend.Backend) er
 	return reconcile.Clean(ctx, common.options(), system)
 }
 
+func recoverCommand(ctx context.Context, args []string, system backend.Backend) error {
+	set := flag.NewFlagSet("recover", flag.ContinueOnError)
+	set.SetOutput(os.Stderr)
+	var common commonFlags
+	common.register(set)
+	if err := set.Parse(args); err != nil {
+		return err
+	}
+	if common.help {
+		usage(os.Stdout)
+		return nil
+	}
+	if err := common.configureBackend(system); err != nil {
+		return err
+	}
+	ctx, cancel := common.commandContext(ctx)
+	defer cancel()
+	return reconcile.Recover(ctx, common.options(), system)
+}
+
 func completion(args []string) error {
 	shell := "bash"
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
@@ -290,7 +313,7 @@ func completion(args []string) error {
 const bashCompletion = `# bash completion for dotpkg
 _dotpkg_complete() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="validate plan diff sync clean add doctor completion version"
+  local commands="validate plan diff sync clean recover add doctor completion version"
   local options="--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help"
   if [[ ${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
@@ -303,12 +326,12 @@ complete -F _dotpkg_complete dotpkg
 
 const zshCompletion = `#compdef dotpkg
 _dotpkg() {
-  _arguments '1:command:(validate plan diff sync clean add doctor completion version)' '*:option:(--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help)'
+  _arguments '1:command:(validate plan diff sync clean recover add doctor completion version)' '*:option:(--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help)'
 }
 _dotpkg "$@"
 `
 
-const fishCompletion = `complete -c dotpkg -f -n '__fish_use_subcommand' -a 'validate plan diff sync clean add doctor completion version'
+const fishCompletion = `complete -c dotpkg -f -n '__fish_use_subcommand' -a 'validate plan diff sync clean recover add doctor completion version'
 complete -c dotpkg -l manifest -r
 complete -c dotpkg -l host -r
 complete -c dotpkg -l state-file -r

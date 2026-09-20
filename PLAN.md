@@ -42,6 +42,7 @@ repositories/releases.
   dotpkg doctor
   dotpkg diff
   dotpkg clean
+  dotpkg recover
   dotpkg completion
   dotpkg version
   ```

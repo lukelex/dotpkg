@@ -11,10 +11,13 @@ import (
 )
 
 type State struct {
-	Path   string
-	Exists bool
-	Data   map[string]any
+	Path     string
+	Exists   bool
+	Migrated bool
+	Data     map[string]any
 }
+
+const CurrentVersion = 1
 
 func Load(path string) (*State, error) {
 	contents, err := os.ReadFile(path)
@@ -42,21 +45,77 @@ func Load(path string) (*State, error) {
 	if data == nil {
 		data = map[string]any{}
 	}
+	migrated, err := migrate(data)
+	if err != nil {
+		return nil, fmt.Errorf("migrate state %s: %w", path, err)
+	}
 	if err := validate(data); err != nil {
 		return nil, fmt.Errorf("validate state %s: %w", path, err)
 	}
-	return &State{Path: path, Exists: true, Data: data}, nil
+	return &State{Path: path, Exists: true, Migrated: migrated, Data: data}, nil
+}
+
+func migrate(data map[string]any) (bool, error) {
+	version := 0
+	if value, ok := data["version"]; ok {
+		switch number := value.(type) {
+		case int:
+			version = number
+		case int64:
+			version = int(number)
+		case uint:
+			version = int(number)
+		case uint64:
+			version = int(number)
+		default:
+			return false, fmt.Errorf("version must be an integer")
+		}
+	}
+	if version > CurrentVersion {
+		return false, fmt.Errorf("unsupported version %d", version)
+	}
+	migrated := version != CurrentVersion
+	if _, ok := data["current"].(map[string]any); !ok {
+		data["current"] = map[string]any{}
+		migrated = true
+	}
+	managed, ok := data["managed"].(map[string]any)
+	if !ok {
+		managed = map[string]any{}
+		data["managed"] = managed
+		migrated = true
+	}
+	for _, name := range []string{"packages", "groups", "configs", "services"} {
+		if _, ok := managed[name]; !ok {
+			managed[name] = []any{}
+			migrated = true
+		}
+	}
+	if _, ok := managed["package_origins"]; !ok {
+		managed["package_origins"] = map[string]any{}
+		migrated = true
+	}
+	data["version"] = CurrentVersion
+	return migrated, nil
 }
 
 func validate(data map[string]any) error {
 	if version, ok := data["version"]; ok {
 		switch value := version.(type) {
 		case int:
-			if value != 1 {
+			if value != CurrentVersion {
+				return fmt.Errorf("unsupported version %d", value)
+			}
+		case int64:
+			if value != CurrentVersion {
+				return fmt.Errorf("unsupported version %d", value)
+			}
+		case uint:
+			if value != CurrentVersion {
 				return fmt.Errorf("unsupported version %d", value)
 			}
 		case uint64:
-			if value != 1 {
+			if value != CurrentVersion {
 				return fmt.Errorf("unsupported version %d", value)
 			}
 		default:
@@ -83,6 +142,20 @@ func validate(data map[string]any) error {
 			}
 		}
 	}
+	if origins, exists := managedMap["package_origins"]; exists {
+		originMap, ok := origins.(map[string]any)
+		if !ok {
+			return fmt.Errorf("managed.package_origins must be a mapping")
+		}
+		for packageName, origin := range originMap {
+			if packageName == "" {
+				return fmt.Errorf("managed.package_origins contains an empty package name")
+			}
+			if value, ok := origin.(string); !ok || (value != "repo" && value != "aur") {
+				return fmt.Errorf("managed.package_origins.%s must be repo or aur", packageName)
+			}
+		}
+	}
 	return nil
 }
 
@@ -104,10 +177,11 @@ func defaultData() map[string]any {
 		"version": 1,
 		"current": map[string]any{},
 		"managed": map[string]any{
-			"packages": []any{},
-			"groups":   []any{},
-			"configs":  []any{},
-			"services": []any{},
+			"packages":        []any{},
+			"package_origins": map[string]any{},
+			"groups":          []any{},
+			"configs":         []any{},
+			"services":        []any{},
 		},
 	}
 }
@@ -157,6 +231,34 @@ func (s *State) SetPackages(packages []string) {
 	s.SetItems(packages, "managed", "packages")
 }
 
+func (s *State) PackageOrigins() map[string]string {
+	value, ok := s.Get("managed", "package_origins")
+	if !ok {
+		return map[string]string{}
+	}
+	origins, ok := value.(map[string]any)
+	if !ok {
+		return map[string]string{}
+	}
+	result := make(map[string]string, len(origins))
+	for packageName, origin := range origins {
+		if value, ok := origin.(string); ok {
+			result[packageName] = value
+		}
+	}
+	return result
+}
+
+func (s *State) SetPackageOrigins(origins map[string]string) {
+	values := make(map[string]any, len(origins))
+	for packageName, origin := range origins {
+		if packageName != "" && (origin == "repo" || origin == "aur") {
+			values[packageName] = origin
+		}
+	}
+	s.Set(values, "managed", "package_origins")
+}
+
 func (s *State) Items(path ...string) []string {
 	value, ok := s.Get(path...)
 	if !ok {
@@ -201,6 +303,11 @@ func (s *State) Write() error {
 	if err := os.MkdirAll(filepath.Dir(s.Path), 0o755); err != nil {
 		return fmt.Errorf("create state directory: %w", err)
 	}
+	if s.Exists {
+		if err := backup(s.Path); err != nil {
+			return fmt.Errorf("backup state: %w", err)
+		}
+	}
 	temporary, err := os.CreateTemp(filepath.Dir(s.Path), ".dotpkg-state-*")
 	if err != nil {
 		return fmt.Errorf("create temporary state: %w", err)
@@ -219,4 +326,46 @@ func (s *State) Write() error {
 	}
 	s.Exists = true
 	return nil
+}
+
+func (s *State) Snapshot() (map[string]any, error) {
+	contents, err := yaml.Marshal(s.Data)
+	if err != nil {
+		return nil, err
+	}
+	var snapshot map[string]any
+	if err := yaml.Unmarshal(contents, &snapshot); err != nil {
+		return nil, err
+	}
+	return snapshot, nil
+}
+
+func (s *State) Restore(snapshot map[string]any) {
+	s.Data = snapshot
+}
+
+func backup(path string) error {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	backupPath := path + ".bak"
+	temporary, err := os.CreateTemp(filepath.Dir(backupPath), ".dotpkg-state-backup-*")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if err := temporary.Chmod(0o600); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(contents); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryName, backupPath)
 }
