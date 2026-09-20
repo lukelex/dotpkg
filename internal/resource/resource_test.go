@@ -512,6 +512,45 @@ func TestConfigPathsRejectRelativeTarget(t *testing.T) {
 	}
 }
 
+func TestConfigPathsRejectTargetOutsideHome(t *testing.T) {
+	_, _, err := configPaths("config/example:/etc/example", Options{RootPath: t.TempDir()})
+	if err == nil || !strings.Contains(err.Error(), "outside allowed home paths") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestConfigPathsRejectsEscapingSourceSymlink(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "config"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(outside, "tool"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "tool"), filepath.Join(root, "config", "tool")); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := configPaths("config/tool:$HOME/tool", Options{RootPath: root})
+	if err == nil || !strings.Contains(err.Error(), "source symlink escapes root") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestConfigPathsRejectsEscapingTargetParentSymlink(t *testing.T) {
+	root := t.TempDir()
+	home := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(home, "links")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	_, _, err := configPaths("config/tool:$HOME/links/tool", Options{RootPath: root})
+	if err == nil || !strings.Contains(err.Error(), "target parent symlink escapes") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestConfigConflictDoesNotRemoveDirectory(t *testing.T) {
 	directory := t.TempDir()
 	source := filepath.Join(directory, "source")
@@ -553,6 +592,44 @@ func TestInspectConfigDetectsBrokenSourceSymlink(t *testing.T) {
 	}
 	if !status.TargetExists || !status.Matches {
 		t.Fatalf("target status = %#v", status)
+	}
+}
+
+func TestCleanRemovesOnlyStaleManagedResources(t *testing.T) {
+	m, s, options, system := resourceFixture(t)
+	staleSource := filepath.Join(options.RootPath, "config", "stale")
+	staleTarget := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "stale")
+	if err := os.WriteFile(staleSource, []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(staleTarget), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(staleSource, staleTarget); err != nil {
+		t.Fatal(err)
+	}
+	s.SetItems([]string{"old-group"}, "managed", "groups")
+	s.SetItems([]string{"config/stale:$XDG_CONFIG_HOME/stale"}, "managed", "configs")
+	s.SetItems([]string{"old.service"}, "managed", "services")
+	s.SetItems([]string{"git"}, "managed", "packages")
+	system.groups = []string{"old-group"}
+	system.groupExists["old-group"] = true
+	system.services["old.service"] = true
+	options.Yes = true
+	if err := Clean(context.Background(), m, s, options, system); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(staleTarget); !os.IsNotExist(err) {
+		t.Fatalf("stale config error = %v", err)
+	}
+	if !reflect.DeepEqual(system.removedGroups, []string{"old-group"}) {
+		t.Fatalf("removed groups = %#v", system.removedGroups)
+	}
+	if !reflect.DeepEqual(system.disabled, []string{"old.service"}) {
+		t.Fatalf("disabled services = %#v", system.disabled)
+	}
+	if len(s.Items("managed", "configs")) != 0 || len(s.Items("managed", "services")) != 0 {
+		t.Fatalf("stale resources remain: configs=%#v services=%#v", s.Items("managed", "configs"), s.Items("managed", "services"))
 	}
 }
 

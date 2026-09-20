@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
+	"github.com/lukelex/dotpkg/internal/resource"
 	"github.com/lukelex/dotpkg/internal/state"
 )
 
@@ -19,6 +21,34 @@ type fakeBackend struct {
 	install       []string
 	remove        []string
 	removeProfile string
+}
+
+func TestPlanDocumentUsesVersionedUnifiedSchema(t *testing.T) {
+	document := NewPlanDocument(Plan{Missing: []string{"git"}}, &resource.Plan{
+		Configs: resource.StagePlan{Extra: []string{"config/old:$HOME/.old"}},
+	}, Options{ManifestPath: "packages.yaml", Profile: "server"})
+	encoded, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Schema  string `json:"schema"`
+		Version int    `json:"version"`
+		Changes int    `json:"changes"`
+		Stages  []struct {
+			Name    string `json:"name"`
+			Changes []any  `json:"changes"`
+		} `json:"stages"`
+	}
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Schema != "dotpkg.plan" || decoded.Version != 1 || decoded.Changes != 2 || len(decoded.Stages) != 4 {
+		t.Fatalf("document = %s", encoded)
+	}
+	if decoded.Stages[0].Name != "packages" || len(decoded.Stages[0].Changes) != 1 {
+		t.Fatalf("package stage = %#v", decoded.Stages[0])
+	}
 }
 
 func TestWithLockRejectsConcurrentOperation(t *testing.T) {
@@ -165,6 +195,38 @@ func TestSyncAdoptsInstalledPackagesOnFirstRun(t *testing.T) {
 	}
 	if len(fake.install) != 0 {
 		t.Fatalf("installed already-present packages = %#v", fake.install)
+	}
+}
+
+func TestCleanRemovesOnlyManagedUndeclaredPackages(t *testing.T) {
+	manifestPath := testManifest(t)
+	statePath := filepath.Join(t.TempDir(), "state.yaml")
+	s, err := state.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetPackages([]string{"git", "old-package"})
+	if err := s.Write(); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeBackend{installed: map[string]bool{"git": true, "old-package": true}}
+	if err := Clean(context.Background(), Options{
+		ManifestPath: manifestPath,
+		StatePath:    statePath,
+		Profile:      "desktop",
+		Yes:          true,
+	}, fake); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(fake.remove, []string{"old-package"}) {
+		t.Fatalf("removed packages = %#v", fake.remove)
+	}
+	loaded, err := state.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.Packages(); !reflect.DeepEqual(got, []string{"git"}) {
+		t.Fatalf("remaining packages = %#v", got)
 	}
 }
 

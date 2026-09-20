@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lukelex/dotpkg/schema/plan-v1.json",
+  "title": "dotpkg plan",
+  "type": "object",
+  "required": ["schema", "version", "manifest", "profile", "changes", "stages"],
+  "properties": {
+    "schema": { "const": "dotpkg.plan" },
+    "version": { "const": 1 },
+    "manifest": { "type": "string" },
+    "profile": { "enum": ["desktop", "server"] },
+    "host": { "type": "string" },
+    "changes": { "type": "integer", "minimum": 0 },
+    "stages": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/stage" }
+    }
+  },
+  "$defs": {
+    "stage": {
+      "type": "object",
+      "required": ["name", "declared", "adopted", "missing", "extra", "changes"],
+      "properties": {
+        "name": { "type": "string" },
+        "declared": { "type": "array", "items": { "type": "string" } },
+        "adopted": { "type": "array", "items": { "type": "string" } },
+        "missing": { "type": "array", "items": { "type": "string" } },
+        "extra": { "type": "array", "items": { "type": "string" } },
+        "changes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["action", "item"],
+            "properties": {
+              "action": { "enum": ["add", "adopt", "install", "remove"] },
+              "item": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

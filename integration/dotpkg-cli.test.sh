@@ -73,7 +73,7 @@ manifest="$temporary/manifest-root/packages.yaml"
 state="$temporary/state/dotpkg/state.yaml"
 
 plan="$($temporary/dotpkg plan --manifest "$manifest" --state-file "$state" --profile server --resources --root "$temporary/manifest-root" --output json)"
-grep -q '"stage":"packages"' <<<"$plan"
+grep -q '"name":"packages"' <<<"$plan"
 
 "$temporary/dotpkg" sync --manifest "$manifest" --state-file "$state" --profile server --resources --root "$temporary/manifest-root" --yes >/dev/null
 [ -f "$temporary/installed/git" ]

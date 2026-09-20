@@ -43,6 +43,90 @@ type Plan struct {
 	Extra    []string
 }
 
+type PlanChange struct {
+	Action string `json:"action"`
+	Item   string `json:"item"`
+}
+
+type PlanStage struct {
+	Name     string       `json:"name"`
+	Declared []string     `json:"declared"`
+	Adopted  []string     `json:"adopted"`
+	Missing  []string     `json:"missing"`
+	Extra    []string     `json:"extra"`
+	Changes  []PlanChange `json:"changes"`
+}
+
+// PlanDocument is the stable machine-readable plan envelope. The schema name
+// and version are intentionally explicit so callers can reject incompatible
+// output instead of guessing from fields.
+type PlanDocument struct {
+	Schema   string      `json:"schema"`
+	Version  int         `json:"version"`
+	Manifest string      `json:"manifest"`
+	Profile  string      `json:"profile"`
+	Host     string      `json:"host,omitempty"`
+	Changes  int         `json:"changes"`
+	Stages   []PlanStage `json:"stages"`
+}
+
+func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Options) PlanDocument {
+	document := PlanDocument{
+		Schema:   "dotpkg.plan",
+		Version:  1,
+		Manifest: options.ManifestPath,
+		Profile:  options.Profile,
+		Host:     options.HostLabel,
+		Stages:   []PlanStage{planStage("packages", packagePlan.Declared, packagePlan.Adopted, packagePlan.Missing, packagePlan.Extra, "install")},
+	}
+	if document.Host == "" {
+		document.Host = options.HostPath
+	}
+	if resourcePlan != nil {
+		document.Stages = append(document.Stages,
+			resourceStage("groups", resourcePlan.Groups),
+			resourceStage("configs", resourcePlan.Configs),
+			resourceStage("services", resourcePlan.Services),
+		)
+	}
+	for _, stage := range document.Stages {
+		document.Changes += len(stage.Changes)
+	}
+	return document
+}
+
+func planStage(name string, declared, adopted, missing, extra []string, missingAction string) PlanStage {
+	stage := PlanStage{
+		Name:     name,
+		Declared: copyStrings(declared),
+		Adopted:  copyStrings(adopted),
+		Missing:  copyStrings(missing),
+		Extra:    copyStrings(extra),
+		Changes:  make([]PlanChange, 0, len(adopted)+len(missing)+len(extra)),
+	}
+	for _, item := range adopted {
+		stage.Changes = append(stage.Changes, PlanChange{Action: "adopt", Item: item})
+	}
+	for _, item := range missing {
+		stage.Changes = append(stage.Changes, PlanChange{Action: missingAction, Item: item})
+	}
+	for _, item := range extra {
+		stage.Changes = append(stage.Changes, PlanChange{Action: "remove", Item: item})
+	}
+	return stage
+}
+
+func resourceStage(name string, plan resource.StagePlan) PlanStage {
+	return planStage(name, plan.Declared, plan.Adopted, plan.Missing, plan.Extra, "add")
+}
+
+func copyStrings(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return append([]string{}, values...)
+}
+
 // DefaultManifestPath returns the manifest selected when --manifest is not
 // supplied. The environment override is useful for wrappers and installations
 // that keep the manifest outside the current working directory.
@@ -303,6 +387,72 @@ func Sync(ctx context.Context, options Options, system backend.Backend) error {
 	})
 }
 
+func Clean(ctx context.Context, options Options, system backend.Backend) error {
+	return WithLock(options, func(normalized Options) error {
+		return cleanLocked(ctx, normalized, system)
+	})
+}
+
+func cleanLocked(ctx context.Context, options Options, system backend.Backend) error {
+	m, s, options, err := Load(options)
+	if err != nil {
+		return err
+	}
+	declared := DeclaredPackages(m, PackageCategories(m, options.Profile, true, s))
+	packagePlan := Plan{Declared: declared, Extra: subtract(s.Packages(), declared)}
+	var resourcePlan *resource.Plan
+	if options.Resources {
+		resourceOptions := resource.Options{Profile: options.Profile, RootPath: options.RootPath, Output: options.Output}
+		planned := resource.CleanPlan(m, s, resourceOptions)
+		resourcePlan = &planned
+	}
+	printPlan(options.Output, packagePlan, options.OutputFormat, resourcePlan, options)
+	changes := len(packagePlan.Extra)
+	if resourcePlan != nil {
+		changes += resourcePlan.Changes()
+	}
+	if changes == 0 {
+		return nil
+	}
+	if options.DryRun {
+		return nil
+	}
+	if !options.Yes {
+		apply, askErr := askSelection(options, "Remove managed items no longer declared? [y/N] ", false)
+		if askErr != nil {
+			return askErr
+		}
+		if !apply {
+			return nil
+		}
+	}
+	if len(packagePlan.Extra) > 0 {
+		if err := system.Remove(ctx, packagePlan.Extra, options.Profile); err != nil {
+			return err
+		}
+		s.SetPackages(subtract(s.Packages(), packagePlan.Extra))
+		setCurrentState(s, m, options)
+		if err := s.Write(); err != nil {
+			return err
+		}
+	}
+	if resourcePlan != nil && resourcePlan.Changes() > 0 {
+		resourceSystem, backendErr := resourceBackend(options, system)
+		if backendErr != nil {
+			return backendErr
+		}
+		setCurrentState(s, m, options)
+		if err := resource.Clean(ctx, m, s, resource.Options{
+			Profile:  options.Profile,
+			RootPath: options.RootPath,
+			Output:   options.Output,
+		}, resourceSystem); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // SyncLocked reconciles packages without acquiring a lock. Callers that need
 // to update a manifest and then reconcile it as one transaction should invoke
 // it from a WithLock callback.
@@ -333,7 +483,23 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	if err != nil {
 		return err
 	}
-	printPlan(options.Output, plan, options.OutputFormat)
+	var resourcePlan *resource.Plan
+	if options.Resources && options.OutputFormat == "json" {
+		resourceSystem, resourceErr := resourceBackend(options, system)
+		if resourceErr != nil {
+			return resourceErr
+		}
+		planned, resourceErr := resource.BuildPlan(ctx, m, s, resource.Options{
+			Profile:  options.Profile,
+			RootPath: options.RootPath,
+			Output:   options.Output,
+		}, resourceSystem)
+		if resourceErr != nil {
+			return resourceErr
+		}
+		resourcePlan = &planned
+	}
+	printPlan(options.Output, plan, options.OutputFormat, resourcePlan, options)
 	if plan.Changes() == 0 {
 		if options.OutputFormat == "text" {
 			fmt.Fprintln(options.Output, "packages: already synchronized")
@@ -381,13 +547,9 @@ func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, op
 	if !options.Resources {
 		return nil
 	}
-	resourceSystem := options.ResourceSystem
-	if resourceSystem == nil {
-		var ok bool
-		resourceSystem, ok = system.(resource.System)
-		if !ok {
-			return fmt.Errorf("backend does not support resource reconciliation")
-		}
+	resourceSystem, err := resourceBackend(options, system)
+	if err != nil {
+		return err
 	}
 	if !options.DryRun {
 		setCurrentState(s, m, options)
@@ -405,7 +567,19 @@ func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, op
 		Input:           options.Input,
 		Output:          options.Output,
 		OutputFormat:    options.OutputFormat,
+		SuppressPlan:    options.OutputFormat == "json",
 	}, resourceSystem)
+}
+
+func resourceBackend(options Options, system backend.Backend) (resource.System, error) {
+	if options.ResourceSystem != nil {
+		return options.ResourceSystem, nil
+	}
+	resourceSystem, ok := system.(resource.System)
+	if !ok {
+		return nil, fmt.Errorf("backend does not support resource reconciliation")
+	}
+	return resourceSystem, nil
 }
 
 func setCurrentState(s *state.State, m *manifest.Manifest, options Options) {
@@ -418,15 +592,9 @@ func setCurrentState(s *state.State, m *manifest.Manifest, options Options) {
 	s.Set(m.Digest(), "current", "manifest_sha256")
 }
 
-func printPlan(output io.Writer, plan Plan, format string) {
+func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resource.Plan, options Options) {
 	if format == "json" {
-		_ = json.NewEncoder(output).Encode(map[string]any{
-			"stage":    "packages",
-			"declared": plan.Declared,
-			"adopted":  plan.Adopted,
-			"missing":  plan.Missing,
-			"extra":    plan.Extra,
-		})
+		_ = json.NewEncoder(output).Encode(NewPlanDocument(plan, resourcePlan, options))
 		return
 	}
 	fmt.Fprintln(output, "PACKAGES")
@@ -438,6 +606,24 @@ func printPlan(output io.Writer, plan Plan, format string) {
 	}
 	for _, packageName := range plan.Extra {
 		fmt.Fprintf(output, "  - remove: %s\n", packageName)
+	}
+	if resourcePlan != nil {
+		for _, stage := range []struct {
+			name string
+			plan resource.StagePlan
+		}{
+			{name: "GROUPS", plan: resourcePlan.Groups},
+			{name: "CONFIGS", plan: resourcePlan.Configs},
+			{name: "SERVICES", plan: resourcePlan.Services},
+		} {
+			if len(stage.plan.Extra) == 0 {
+				continue
+			}
+			fmt.Fprintln(output, stage.name)
+			for _, item := range stage.plan.Extra {
+				fmt.Fprintf(output, "  - remove: %s\n", item)
+			}
+		}
 	}
 }
 

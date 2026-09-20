@@ -40,6 +40,9 @@ repositories/releases.
   dotpkg sync
   dotpkg add
   dotpkg doctor
+  dotpkg diff
+  dotpkg clean
+  dotpkg completion
   dotpkg version
   ```
 

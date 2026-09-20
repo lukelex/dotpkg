@@ -41,6 +41,7 @@ type Options struct {
 	Input           io.Reader
 	Output          io.Writer
 	OutputFormat    string
+	SuppressPlan    bool
 }
 
 type StagePlan struct {
@@ -92,6 +93,24 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, option
 	return Plan{Groups: groups, Configs: configs, Services: services}, nil
 }
 
+func CleanPlan(m *manifest.Manifest, s *state.State, options Options) Plan {
+	options = normalize(options, m)
+	return Plan{
+		Groups: StagePlan{
+			Declared: declaredMetadata(m, s, options.Profile, "groups"),
+			Extra:    subtract(s.Items("managed", "groups"), declaredMetadata(m, s, options.Profile, "groups")),
+		},
+		Configs: StagePlan{
+			Declared: declaredMetadata(m, s, options.Profile, "configs"),
+			Extra:    subtract(s.Items("managed", "configs"), declaredMetadata(m, s, options.Profile, "configs")),
+		},
+		Services: StagePlan{
+			Declared: declaredServices(m, s, options.Profile),
+			Extra:    subtract(s.Items("managed", "services"), declaredServices(m, s, options.Profile)),
+		},
+	}
+}
+
 // InspectConfig reports the filesystem state of a declared config mapping
 // without changing it. It is used by diagnostics and deliberately exposes
 // status rather than internal path parsing details.
@@ -128,7 +147,9 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 	if err != nil {
 		return err
 	}
-	printPlan(options.Output, plan, options.OutputFormat)
+	if !options.SuppressPlan {
+		printPlan(options.Output, plan, options.OutputFormat)
+	}
 	if plan.Changes() == 0 || options.DryRun {
 		return nil
 	}
@@ -187,6 +208,68 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		}
 		s.SetItems(items, stage.path...)
 	}
+	return s.Write()
+}
+
+// Clean removes only resources recorded as managed that are no longer
+// declared. It never installs, enables, adopts, or replaces anything.
+func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) error {
+	options = normalize(options, m)
+	plan := CleanPlan(m, s, options)
+	groups := plan.Groups.Extra
+	configs := plan.Configs.Extra
+	services := plan.Services.Extra
+
+	if len(groups) > 0 {
+		currentGroups, err := system.CurrentGroups(ctx, options.User)
+		if err != nil {
+			return err
+		}
+		for _, group := range groups {
+			if !contains(currentGroups, group) {
+				continue
+			}
+			if err := system.RemoveFromGroup(ctx, options.User, group); err != nil {
+				return err
+			}
+		}
+	}
+	for _, mapping := range configs {
+		source, target, err := configPaths(mapping, options)
+		if err != nil {
+			return err
+		}
+		matches, err := configMatches(target, source)
+		if err != nil {
+			return err
+		}
+		if matches {
+			if err := os.Remove(target); err != nil {
+				return fmt.Errorf("remove config link %s: %w", target, err)
+			}
+		}
+	}
+	if len(configs) > 0 {
+		if err := reloadForDeclaredConfigs(ctx, configs, options, system); err != nil {
+			return err
+		}
+	}
+	for _, service := range services {
+		userService := strings.HasPrefix(service, "user:")
+		exists, err := system.ServiceExists(ctx, userService, strings.TrimPrefix(service, "user:"))
+		if err != nil {
+			return err
+		}
+		if !exists {
+			continue
+		}
+		if err := system.DisableService(ctx, userService, strings.TrimPrefix(service, "user:")); err != nil {
+			return err
+		}
+	}
+	s.SetItems(subtract(s.Items("managed", "groups"), groups), "managed", "groups")
+	s.SetItems(subtract(s.Items("managed", "configs"), configs), "managed", "configs")
+	s.SetItems(subtract(s.Items("managed", "services"), services), "managed", "services")
 	return s.Write()
 }
 
@@ -568,6 +651,10 @@ func configPaths(mapping string, options Options) (string, string, error) {
 	if !filepath.IsAbs(target) {
 		return "", "", fmt.Errorf("config target must be absolute: %s", parts[1])
 	}
+	target = filepath.Clean(target)
+	if !pathWithin(home, target) && !pathWithin(configHome, target) {
+		return "", "", fmt.Errorf("config target is outside allowed home paths: %s", target)
+	}
 	root, err := filepath.Abs(options.RootPath)
 	if err != nil {
 		return "", "", fmt.Errorf("resolve resource root: %w", err)
@@ -580,7 +667,82 @@ func configPaths(mapping string, options Options) (string, string, error) {
 	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		return "", "", fmt.Errorf("config source escapes root: %s", parts[0])
 	}
+	if err := validateSourceSymlinks(root, source); err != nil {
+		return "", "", err
+	}
+	if err := validateTargetSymlinks(target, home, configHome); err != nil {
+		return "", "", err
+	}
 	return source, target, nil
+}
+
+func pathWithin(root, path string) bool {
+	root = filepath.Clean(root)
+	path = filepath.Clean(path)
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
+}
+
+func validateSourceSymlinks(root, source string) error {
+	if _, err := os.Lstat(source); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("inspect config source %s: %w", source, err)
+	}
+	realRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return fmt.Errorf("resolve config root %s: %w", root, err)
+	}
+	realSource, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("resolve config source %s: %w", source, err)
+	}
+	if !pathWithin(realRoot, realSource) {
+		return fmt.Errorf("config source symlink escapes root: %s", source)
+	}
+	return nil
+}
+
+func validateTargetSymlinks(target string, allowedRoots ...string) error {
+	parent := filepath.Dir(target)
+	realParent, err := resolvedExistingAncestor(parent)
+	if err != nil {
+		return fmt.Errorf("resolve config target parent %s: %w", parent, err)
+	}
+	for _, root := range allowedRoots {
+		if !pathWithin(root, target) {
+			continue
+		}
+		realRoot, err := resolvedExistingAncestor(root)
+		if err != nil {
+			return fmt.Errorf("resolve config target root %s: %w", root, err)
+		}
+		if !pathWithin(realRoot, realParent) {
+			return fmt.Errorf("config target parent symlink escapes allowed path: %s", target)
+		}
+		return nil
+	}
+	return fmt.Errorf("config target is outside allowed home paths: %s", target)
+}
+
+func resolvedExistingAncestor(path string) (string, error) {
+	path = filepath.Clean(path)
+	for {
+		if _, err := os.Lstat(path); err == nil {
+			return filepath.EvalSymlinks(path)
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(path)
+		if parent == path {
+			return "", fmt.Errorf("no existing ancestor")
+		}
+		path = parent
+	}
 }
 
 func configMatches(target, source string) (bool, error) {

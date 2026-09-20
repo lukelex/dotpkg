@@ -46,9 +46,12 @@ still requires host tools such as `pacman`, `yay`, and `sudo`.
 ```text
 dotpkg validate --manifest packages.yaml --profile desktop
 dotpkg plan --manifest packages.yaml --profile desktop --state-file state.yaml
+dotpkg diff --manifest packages.yaml --profile desktop --resources
 dotpkg sync --manifest packages.yaml --profile desktop --state-file state.yaml
+dotpkg clean --manifest packages.yaml --profile desktop --yes
 dotpkg add lm_sensors --manifest packages.yaml --scope desktop
 dotpkg doctor --manifest packages.yaml --profile desktop
+dotpkg completion --shell bash > dotpkg.bash
 ```
 
 Use `--manifest PATH` to select a different manifest, or set
@@ -63,9 +66,15 @@ dotpkg plan --manifest packages.yaml --profile desktop
 dotpkg sync --manifest packages.yaml --profile desktop --yes
 ```
 
-Use `--output json` with `plan` or `sync` for machine-readable JSON Lines
-output. Resource mode emits one record for packages followed by records for
-groups, configs, and services.
+Use `--output json` with `plan`, `diff`, `sync`, or `clean` for one unified,
+machine-readable plan document. The output uses schema version 1 and is
+specified in [`schema/plan-v1.json`](schema/plan-v1.json); it includes package,
+group, config, and service stages plus normalized change actions.
+
+`clean` is destructive but limited to managed items no longer declared. It
+never installs or adopts anything and prompts unless `--yes` is supplied.
+`diff` is a read-only alias for `plan`. Completion scripts are available for
+Bash, Zsh, and Fish.
 
 `doctor` is read-only. It checks package installation and availability, state
 validity, config links and sources, group membership, services, and backend
