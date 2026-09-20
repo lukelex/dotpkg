@@ -55,11 +55,17 @@ changes can be included in the same plan with `--resources`.
 ## Quick start
 
 ```sh
-dotpkg validate --manifest packages.yaml --profile desktop
-dotpkg plan --manifest packages.yaml --profile desktop
-dotpkg sync --manifest packages.yaml --profile desktop --yes
-dotpkg doctor --manifest packages.yaml --profile desktop
+dotpkg init
+dotpkg validate --profile desktop
+dotpkg plan --profile desktop
+dotpkg sync --profile desktop --yes
+dotpkg doctor --profile desktop
 ```
+
+`dotpkg init` creates `~/.config/dotpkg/package.yaml` and
+`~/.config/dotpkg/state.yaml` (or the equivalent `XDG_CONFIG_HOME` directory)
+without overwriting existing files. Once initialized, commands automatically
+use those files. `--manifest` and `--state-file` remain explicit overrides.
 
 Use `clean --yes` only when removing stale managed packages is intended. If a
 transaction is interrupted and a journal remains beside the state file, review
@@ -74,7 +80,7 @@ Releases provide libc-independent static binaries for `linux/amd64` and
 `linux/arm64`. Download a pinned release and verify it before installing:
 
 ```sh
-version=v0.7.0
+version=v0.9.0
 curl --fail --location --remote-name \
   "https://github.com/lukelex/dotpkg/releases/download/${version}/dotpkg-linux-amd64"
 curl --fail --location --remote-name \
@@ -140,6 +146,7 @@ add        Declare, validate, install, and track one package
 doctor     Produce read-only diagnostics
 completion Generate Bash, Zsh, or Fish completion
 version    Print the executable version
+init       Create the per-user manifest and state files
 ```
 
 Use `--output json` with `plan`, `diff`, `sync`, or `clean` for a unified,

@@ -72,6 +72,10 @@ export XDG_STATE_HOME="$temporary/state"
 manifest="$temporary/manifest-root/packages.yaml"
 state="$temporary/state/dotpkg/state.yaml"
 
+"$temporary/dotpkg" init >/dev/null
+[ -f "$HOME/.config/dotpkg/package.yaml" ]
+[ -f "$HOME/.config/dotpkg/state.yaml" ]
+
 plan="$($temporary/dotpkg plan --manifest "$manifest" --state-file "$state" --profile server --resources --root "$temporary/manifest-root" --output json)"
 grep -q '"name":"packages"' <<<"$plan"
 

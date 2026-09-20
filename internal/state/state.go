@@ -27,6 +27,10 @@ type AppImage struct {
 
 const CurrentVersion = 1
 
+func New(path string) *State {
+	return &State{Path: path, Data: defaultData()}
+}
+
 func Load(path string) (*State, error) {
 	contents, err := os.ReadFile(path)
 	if os.IsNotExist(err) {

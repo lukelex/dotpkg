@@ -44,6 +44,7 @@ still requires host tools such as `pacman`, `yay`, and `sudo`.
 ## CLI usage
 
 ```text
+dotpkg init
 dotpkg validate --manifest packages.yaml --profile desktop
 dotpkg plan --manifest packages.yaml --profile desktop --state-file state.yaml
 dotpkg diff --manifest packages.yaml --profile desktop --resources
@@ -58,6 +59,12 @@ dotpkg completion --shell bash > dotpkg.bash
 Use `--manifest PATH` to select a different manifest, or set
 `DOTPKG_MANIFEST=PATH` for a wrapper-wide default. Resource paths still resolve
 from the inferred manifest root unless `--root PATH` is supplied explicitly.
+
+Without an explicit manifest, dotpkg prefers the initialized
+`$XDG_CONFIG_HOME/dotpkg/package.yaml` (or `~/.config/dotpkg/package.yaml`).
+After initialization, its default state is the adjacent
+`state.yaml`. Before initialization, existing working-directory manifests keep
+the legacy `$XDG_STATE_HOME/dotpkg/state.yaml` default.
 
 Host overlays are supplied with `--host PATH`. Use `plan` before `sync` to
 inspect changes without modifying the system:

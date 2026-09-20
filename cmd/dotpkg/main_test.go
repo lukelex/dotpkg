@@ -36,6 +36,21 @@ func TestChooseScopeUsesProfileByDefaultInDryRun(t *testing.T) {
 	}
 }
 
+func TestInitCommandCreatesUserConfiguration(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("DOTPKG_MANIFEST", "")
+	t.Setenv("XDG_CONFIG_HOME", directory)
+	if err := run(context.Background(), []string{"init"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "dotpkg", "package.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(directory, "dotpkg", "state.yaml")); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestChooseScopePromptsAndAcceptsExplicitScope(t *testing.T) {
 	var output strings.Builder
 	options := reconcile.Options{

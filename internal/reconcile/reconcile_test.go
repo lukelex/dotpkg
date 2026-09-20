@@ -616,6 +616,48 @@ func TestDefaultManifestPathUsesEnvironmentOverride(t *testing.T) {
 	}
 }
 
+func TestInitCreatesAndSelectsUserConfiguration(t *testing.T) {
+	directory := t.TempDir()
+	t.Setenv("DOTPKG_MANIFEST", "")
+	t.Setenv("XDG_CONFIG_HOME", directory)
+	var output strings.Builder
+	if err := Init(&output); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "dotpkg", "package.yaml")
+	statePath := filepath.Join(directory, "dotpkg", "state.yaml")
+	if !fileExists(manifestPath) || !fileExists(statePath) {
+		t.Fatalf("initialized files missing: %s, %s", manifestPath, statePath)
+	}
+	if got := DefaultManifestPath(); got != manifestPath {
+		t.Fatalf("default manifest = %q, want %q", got, manifestPath)
+	}
+	options, err := (Options{}).normalize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.StatePath != statePath {
+		t.Fatalf("default state = %q, want %q", options.StatePath, statePath)
+	}
+	original, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, append(original, []byte("# user changes\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Init(nil); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(string(updated), "# user changes\n") {
+		t.Fatal("repeated init overwrote the user manifest")
+	}
+}
+
 func TestCurrentDotfilesManifestHasSameSelectedPackageCount(t *testing.T) {
 	path := filepath.Join("..", "..", "testdata", "dotfiles-packages.yaml")
 	m, err := manifest.Load(path, "")

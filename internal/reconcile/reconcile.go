@@ -142,14 +142,130 @@ func copyStrings(values []string) []string {
 	return append([]string{}, values...)
 }
 
+// ConfigDir returns dotpkg's per-user configuration directory.
+func ConfigDir() string {
+	configHome := os.Getenv("XDG_CONFIG_HOME")
+	if configHome == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return filepath.Join(".", ".config", "dotpkg")
+		}
+		configHome = filepath.Join(home, ".config")
+	}
+	return filepath.Join(configHome, "dotpkg")
+}
+
+func ConfigManifestPath() string { return filepath.Join(ConfigDir(), "package.yaml") }
+
+func ConfigStatePath() string { return filepath.Join(ConfigDir(), "state.yaml") }
+
 // DefaultManifestPath returns the manifest selected when --manifest is not
 // supplied. The environment override is useful for wrappers and installations
-// that keep the manifest outside the current working directory.
+// that keep the manifest outside the current working directory. An initialized
+// per-user manifest takes precedence over the legacy working-directory path.
 func DefaultManifestPath() string {
 	if path := os.Getenv("DOTPKG_MANIFEST"); path != "" {
 		return path
 	}
+	if path := ConfigManifestPath(); fileExists(path) {
+		return path
+	}
 	return "packages.yaml"
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
+}
+
+func defaultStatePath(manifestPath string) string {
+	if samePath(manifestPath, ConfigManifestPath()) && fileExists(ConfigManifestPath()) {
+		return ConfigStatePath()
+	}
+	stateHome := os.Getenv("XDG_STATE_HOME")
+	if stateHome == "" {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			stateHome = filepath.Join(home, ".local", "state")
+		} else {
+			stateHome = filepath.Join(".", ".local", "state")
+		}
+	}
+	return filepath.Join(stateHome, "dotpkg", "state.yaml")
+}
+
+func samePath(left, right string) bool {
+	left, leftErr := filepath.Abs(left)
+	right, rightErr := filepath.Abs(right)
+	return leftErr == nil && rightErr == nil && left == right
+}
+
+const initializedManifest = `source: repo
+common:
+  packages:
+    headless: {}
+profiles:
+  desktop:
+    packages:
+      desktop: {}
+      extras: {}
+      hyprland: {}
+      i3: {}
+    options: {}
+  server:
+    packages:
+      headless: {}
+`
+
+// Init creates the per-user manifest and state files without overwriting
+// existing user data. It is intentionally idempotent for already-created
+// files, which also allows a partially completed initialization to recover.
+func Init(output io.Writer) error {
+	directory := ConfigDir()
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return fmt.Errorf("create dotpkg config directory: %w", err)
+	}
+	manifestPath := ConfigManifestPath()
+	if !fileExists(manifestPath) {
+		if err := writeAtomic(manifestPath, []byte(initializedManifest), 0o600); err != nil {
+			return fmt.Errorf("create dotpkg manifest: %w", err)
+		}
+	}
+	statePath := ConfigStatePath()
+	if !fileExists(statePath) {
+		initializedState := state.New(statePath)
+		if err := initializedState.Write(); err != nil {
+			return fmt.Errorf("create dotpkg state: %w", err)
+		}
+		if err := os.Chmod(statePath, 0o600); err != nil {
+			return fmt.Errorf("protect dotpkg state: %w", err)
+		}
+	}
+	if output != nil {
+		_, _ = fmt.Fprintf(output, "dotpkg initialized in %s\nmanifest: %s\nstate: %s\n", directory, manifestPath, statePath)
+	}
+	return nil
+}
+
+func writeAtomic(path string, contents []byte, mode os.FileMode) error {
+	temporary, err := os.CreateTemp(filepath.Dir(path), ".dotpkg-init-*")
+	if err != nil {
+		return err
+	}
+	temporaryName := temporary.Name()
+	defer os.Remove(temporaryName)
+	if err := temporary.Chmod(mode); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(contents); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temporaryName, path)
 }
 
 func (p Plan) Changes() int {
@@ -161,15 +277,7 @@ func (o Options) normalize() (Options, error) {
 		o.ManifestPath = DefaultManifestPath()
 	}
 	if o.StatePath == "" {
-		stateHome := os.Getenv("XDG_STATE_HOME")
-		if stateHome == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return o, fmt.Errorf("find home directory: %w", err)
-			}
-			stateHome = home + "/.local/state"
-		}
-		o.StatePath = stateHome + "/dotpkg/state.yaml"
+		o.StatePath = defaultStatePath(o.ManifestPath)
 	}
 	if o.Profile == "" {
 		o.Profile = "desktop"
