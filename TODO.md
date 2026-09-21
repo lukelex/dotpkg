@@ -9,7 +9,7 @@
 
 - [x] Split group, config-link, and service implementations from
   `internal/resource/resource.go`; remove positional service-stage handling.
-- [ ] Share user-path expansion and containment validation between config and
+- [x] Share user-path expansion and containment validation between config and
   directory resources.
 - [ ] Make resource clean-plan construction report declaration/discovery
   failures rather than suppressing them.

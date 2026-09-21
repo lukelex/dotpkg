@@ -623,6 +623,18 @@ func TestConfigPathsRejectRelativeTarget(t *testing.T) {
 	}
 }
 
+func TestUserDirectoryPathExpandsTildeInsideHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path, err := userDirectoryPath("~/.cache/tool")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(home, ".cache", "tool"); path != want {
+		t.Fatalf("directory path = %q, want %q", path, want)
+	}
+}
+
 func TestConfigPathsRejectTargetOutsideHome(t *testing.T) {
 	_, _, err := configPaths("config/example:/etc/example", Options{RootPath: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "outside allowed home paths") {

@@ -376,21 +376,14 @@ func configPaths(mapping string, options Options) (string, string, error) {
 	if filepath.IsAbs(parts[0]) {
 		return "", "", fmt.Errorf("config source must be relative to root: %s", parts[0])
 	}
-	home, err := os.UserHomeDir()
+	target, roots, err := resolveUserPath(parts[1], false)
 	if err != nil {
-		return "", "", fmt.Errorf("find home directory: %w", err)
+		return "", "", err
 	}
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		configHome = filepath.Join(home, ".config")
-	}
-	target := strings.ReplaceAll(parts[1], "$HOME", home)
-	target = strings.ReplaceAll(target, "$XDG_CONFIG_HOME", configHome)
 	if !filepath.IsAbs(target) {
 		return "", "", fmt.Errorf("config target must be absolute: %s", parts[1])
 	}
-	target = filepath.Clean(target)
-	if !pathWithin(home, target) && !pathWithin(configHome, target) {
+	if !roots.contains(target) {
 		return "", "", fmt.Errorf("config target is outside allowed home paths: %s", target)
 	}
 	root, err := filepath.Abs(options.RootPath)
@@ -408,7 +401,7 @@ func configPaths(mapping string, options Options) (string, string, error) {
 	if err := validateSourceSymlinks(root, source); err != nil {
 		return "", "", err
 	}
-	if err := validateTargetSymlinks(target, home, configHome); err != nil {
+	if err := validateTargetSymlinks(target, roots.home, roots.configHome); err != nil {
 		return "", "", err
 	}
 	return source, target, nil

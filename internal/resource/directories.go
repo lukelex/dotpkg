@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"syscall"
 
 	"github.com/lukelex/dotpkg/internal/manifest"
@@ -94,26 +93,14 @@ func cleanDirectories(directories []string) error {
 }
 
 func userDirectoryPath(value string) (string, error) {
-	home, err := os.UserHomeDir()
+	path, roots, err := resolveUserPath(value, true)
 	if err != nil {
-		return "", fmt.Errorf("find home directory: %w", err)
-	}
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		configHome = filepath.Join(home, ".config")
-	}
-	path := strings.ReplaceAll(value, "$HOME", home)
-	path = strings.ReplaceAll(path, "$XDG_CONFIG_HOME", configHome)
-	if path == "~" {
-		path = home
-	} else if strings.HasPrefix(path, "~/") {
-		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+		return "", err
 	}
 	if !filepath.IsAbs(path) {
 		return "", fmt.Errorf("directory target must be absolute or use $HOME: %s", value)
 	}
-	path = filepath.Clean(path)
-	if !pathWithin(home, path) && !pathWithin(configHome, path) {
+	if !roots.contains(path) {
 		return "", fmt.Errorf("directory target is outside the user home: %s", value)
 	}
 	return path, nil
