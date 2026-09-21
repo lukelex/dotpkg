@@ -94,7 +94,7 @@ Releases provide libc-independent static binaries for `linux/amd64` and
 `linux/arm64`. Download a pinned release and verify it before installing:
 
 ```sh
-version=v0.12.0
+version=v0.13.0
 curl --fail --location --remote-name \
   "https://github.com/lukelex/dotpkg/releases/download/${version}/dotpkg-linux-amd64"
 curl --fail --location --remote-name \

@@ -11,7 +11,7 @@ Each release also publishes `SHA256SUMS`. Verify a pinned release before
 installing it into a dotfiles checkout:
 
 ```sh
-version=v0.12.0
+version=v0.13.0
 curl --fail --location --remote-name \
   "https://github.com/lukelex/dotpkg/releases/download/${version}/dotpkg-linux-amd64"
 curl --fail --location --remote-name \
