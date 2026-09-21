@@ -15,8 +15,10 @@
   failures rather than suppressing them.
 - [x] Extend `doctor` with executable-link and directory diagnostics.
 - [x] Centralize managed-state list keys in `internal/state`.
-- [ ] Split package sync and clean from `internal/reconcile/reconcile.go`.
+- [x] Split package sync and clean from `internal/reconcile/reconcile.go`.
   - [x] Move plan-document and text rendering to `plan.go`.
+  - [x] Move cleanup orchestration to `clean.go`.
+  - [x] Move sync and recovery orchestration to `sync.go`.
 
 Do not introduce a generic resource abstraction that erases resource-specific
 safety rules. Prefer a shared orchestration registry and focused resource
