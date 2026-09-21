@@ -7,7 +7,7 @@
 
 ## Next
 
-- [ ] Split group, config-link, and service implementations from
+- [x] Split group, config-link, and service implementations from
   `internal/resource/resource.go`; remove positional service-stage handling.
 - [ ] Share user-path expansion and containment validation between config and
   directory resources.
