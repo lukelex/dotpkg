@@ -23,3 +23,13 @@
 Do not introduce a generic resource abstraction that erases resource-specific
 safety rules. Prefer a shared orchestration registry and focused resource
 modules.
+
+## Go quality practices
+
+- [x] Run pinned `staticcheck` in CI.
+- [x] Run the Go race detector in a dedicated CI job.
+- [x] Add fuzz coverage for manifest parsing and resource path handling.
+- [x] Add a golden fixture for the versioned plan document.
+- [x] Run pinned `govulncheck` in CI.
+- [ ] Publish coverage reports without a rigid coverage threshold.
+- [ ] Consolidate test fakes if further resource types make duplication costly.

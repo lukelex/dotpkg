@@ -53,6 +53,13 @@ func TestPlanDocumentUsesVersionedUnifiedSchema(t *testing.T) {
 	if decoded.Stages[0].Name != "packages" || len(decoded.Stages[0].Changes) != 1 {
 		t.Fatalf("package stage = %#v", decoded.Stages[0])
 	}
+	golden, err := os.ReadFile(filepath.Join("..", "..", "testdata", "fixtures", "plan-document.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(encoded), strings.TrimSpace(string(golden)); got != want {
+		t.Fatalf("plan document = %s\nwant = %s", got, want)
+	}
 }
 
 func TestWithLockRejectsConcurrentOperation(t *testing.T) {

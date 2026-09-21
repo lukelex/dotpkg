@@ -23,14 +23,6 @@ func declaredDirectories(m *manifest.Manifest, s *state.State, options Options) 
 	return unique(result), nil
 }
 
-func cleanDeclaredDirectories(m *manifest.Manifest, s *state.State, options Options) []string {
-	directories, err := declaredDirectories(m, s, options)
-	if err != nil {
-		return nil
-	}
-	return directories
-}
-
 func planDirectories(m *manifest.Manifest, s *state.State, options Options) (StagePlan, error) {
 	declared, err := declaredDirectories(m, s, options)
 	if err != nil {

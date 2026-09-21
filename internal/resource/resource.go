@@ -351,9 +351,7 @@ func declaredMetadata(m *manifest.Manifest, s *state.State, profile, key string)
 func declaredServices(m *manifest.Manifest, s *state.State, profile string) []string {
 	var values []string
 	for _, path := range categoryPaths(m, profile, s) {
-		for _, service := range m.ServiceNames(path, "system") {
-			values = append(values, service)
-		}
+		values = append(values, m.ServiceNames(path, "system")...)
 		for _, service := range m.ServiceNames(path, "user") {
 			values = append(values, "user:"+service)
 		}
