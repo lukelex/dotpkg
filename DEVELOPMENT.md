@@ -130,7 +130,7 @@ by the Debian and Fedora backends.
 ## Custom resources
 
 Resource metadata may be attached to packages or declared independently. Use
-explicit resources for configuration links, executable links, and services that are not owned by
+explicit resources for configuration links, executable links, directories, and services that are not owned by
 a package:
 
 ```yaml
@@ -150,6 +150,9 @@ resources:
       target: /usr/local/bin
       prefix: u_
       prune: true
+  directories:
+    - $HOME/.ssh
+    - $HOME/projects
 ```
 
 `profiles` and `selections` are optional. A resource is declared only when its
@@ -162,6 +165,11 @@ Executable-link collections link executable files from a source directory into
 the target directory. `prefix` is optional and defaults to empty; `prune: true`
 removes stale dangling symlinks with the collection prefix. Existing conflicting
 targets are preserved unless `--replace` is supplied.
+
+Directory resources accept path strings or filtered mappings with a `path`
+field. Paths may use `$HOME` or `$XDG_CONFIG_HOME`; they must remain inside the
+user home. A leading `~/` is also accepted. Existing directories are adopted, and cleanup removes only empty
+directories managed by dotpkg.
 
 Manifest fields consumed by dotpkg are structurally validated before planning.
 Unknown metadata is preserved for compatibility with the surrounding dotfiles

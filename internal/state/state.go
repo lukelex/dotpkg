@@ -97,7 +97,7 @@ func migrate(data map[string]any) (bool, error) {
 		data["managed"] = managed
 		migrated = true
 	}
-	for _, name := range []string{"packages", "groups", "configs", "services", "executable_links"} {
+	for _, name := range []string{"packages", "groups", "configs", "services", "executable_links", "directories"} {
 		if _, ok := managed[name]; !ok {
 			managed[name] = []any{}
 			migrated = true
@@ -151,7 +151,7 @@ func validate(data map[string]any) error {
 	if !ok {
 		return fmt.Errorf("managed must be a mapping")
 	}
-	for _, name := range []string{"packages", "groups", "configs", "services", "executable_links"} {
+	for _, name := range []string{"packages", "groups", "configs", "services", "executable_links", "directories"} {
 		if value, exists := managedMap[name]; exists {
 			if err := validateStringList(value, "managed."+name); err != nil {
 				return err
@@ -220,6 +220,7 @@ func defaultData() map[string]any {
 			"configs":          []any{},
 			"services":         []any{},
 			"executable_links": []any{},
+			"directories":      []any{},
 		},
 	}
 }

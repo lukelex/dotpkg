@@ -306,6 +306,38 @@ func validateResources(value any) error {
 			return err
 		}
 	}
+	if directories, ok := resources["directories"]; ok {
+		if err := validateDirectories(directories); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateDirectories(value any) error {
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("resources.directories must be a list")
+	}
+	for index, item := range items {
+		path := fmt.Sprintf("resources.directories[%d]", index)
+		switch item := item.(type) {
+		case string:
+			if item == "" {
+				return fmt.Errorf("%s must be a non-empty path", path)
+			}
+		case map[string]any:
+			directory, ok := item["path"].(string)
+			if !ok || directory == "" {
+				return fmt.Errorf("%s.path must be a non-empty string", path)
+			}
+			if err := validateFilters(item, path); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("%s must be a path string or resource mapping", path)
+		}
+	}
 	return nil
 }
 
@@ -642,6 +674,35 @@ func (m *Manifest) ResourceConfigs(profile string, selections map[string]bool) [
 			target, targetOK := value["target"].(string)
 			if sourceOK && targetOK && source != "" && target != "" {
 				result = append(result, source+":"+target)
+			}
+		}
+	}
+	return uniqueStrings(result)
+}
+
+// ResourceDirectories returns explicit user directories, optionally filtered
+// by profile and selections. Entries may be path strings or mappings with a
+// path, profiles, and selections field.
+func (m *Manifest) ResourceDirectories(profile string, selections map[string]bool) []string {
+	resources, ok := m.Data["resources"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	items, ok := resources["directories"].([]any)
+	if !ok {
+		return nil
+	}
+	var result []string
+	for _, item := range items {
+		switch value := item.(type) {
+		case string:
+			result = append(result, value)
+		case map[string]any:
+			if !resourceSelected(value, profile, selections) {
+				continue
+			}
+			if path, ok := value["path"].(string); ok && path != "" {
+				result = append(result, path)
 			}
 		}
 	}

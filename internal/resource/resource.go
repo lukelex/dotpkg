@@ -69,12 +69,13 @@ type Plan struct {
 	Configs         StagePlan
 	Services        StagePlan
 	ExecutableLinks StagePlan
+	Directories     StagePlan
 }
 
 var errConfigConflict = errors.New("config target conflict")
 
 func (p Plan) Changes() int {
-	return p.Groups.Changes() + p.Configs.Changes() + p.Services.Changes() + p.ExecutableLinks.Changes()
+	return p.Groups.Changes() + p.Configs.Changes() + p.Services.Changes() + p.ExecutableLinks.Changes() + p.Directories.Changes()
 }
 
 func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (Plan, error) {
@@ -95,7 +96,11 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, option
 	if err != nil {
 		return Plan{}, err
 	}
-	return Plan{Groups: groups, Configs: configs, Services: services, ExecutableLinks: executableLinks}, nil
+	directories, err := planDirectories(m, s, options)
+	if err != nil {
+		return Plan{}, err
+	}
+	return Plan{Groups: groups, Configs: configs, Services: services, ExecutableLinks: executableLinks, Directories: directories}, nil
 }
 
 func CleanPlan(m *manifest.Manifest, s *state.State, options Options) Plan {
@@ -115,6 +120,9 @@ func CleanPlan(m *manifest.Manifest, s *state.State, options Options) Plan {
 		},
 		ExecutableLinks: StagePlan{
 			Extra: subtract(s.Items("managed", "executable_links"), declaredExecutableLinks(m, s, options)),
+		},
+		Directories: StagePlan{
+			Extra: subtract(s.Items("managed", "directories"), cleanDeclaredDirectories(m, s, options)),
 		},
 	}
 }
@@ -177,6 +185,7 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		{name: "configs", plan: plan.Configs, apply: func(p StagePlan) error { return applyConfigs(p, options) }, path: []string{"managed", "configs"}},
 		{name: "services", plan: plan.Services, apply: func(p StagePlan) error { return applyServices(ctx, p, options, system) }, path: []string{"managed", "services"}},
 		{name: "executable_links", plan: plan.ExecutableLinks, apply: func(p StagePlan) error { return applyExecutableLinks(p, options, m, s) }, path: []string{"managed", "executable_links"}},
+		{name: "directories", plan: plan.Directories, apply: func(p StagePlan) error { return applyDirectories(p) }, path: []string{"managed", "directories"}},
 	}
 	for index := range stages {
 		stage := &stages[index]
@@ -229,6 +238,7 @@ func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Op
 	configs := plan.Configs.Extra
 	services := plan.Services.Extra
 	executableLinks := plan.ExecutableLinks.Extra
+	directories := plan.Directories.Extra
 
 	if len(groups) > 0 {
 		currentGroups, err := system.CurrentGroups(ctx, options.User)
@@ -266,6 +276,9 @@ func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Op
 			}
 		}
 	}
+	if err := cleanDirectories(directories); err != nil {
+		return err
+	}
 	if len(configs) > 0 {
 		if err := reloadForDeclaredConfigs(ctx, configs, options, system); err != nil {
 			return err
@@ -287,6 +300,7 @@ func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Op
 	s.SetItems(subtract(s.Items("managed", "groups"), groups), "managed", "groups")
 	s.SetItems(subtract(s.Items("managed", "configs"), configs), "managed", "configs")
 	s.SetItems(subtract(s.Items("managed", "executable_links"), executableLinks), "managed", "executable_links")
+	s.SetItems(subtract(s.Items("managed", "directories"), directories), "managed", "directories")
 	s.SetItems(subtract(s.Items("managed", "services"), services), "managed", "services")
 	return s.Write()
 }
@@ -833,6 +847,7 @@ func printPlan(output io.Writer, plan Plan, format string) {
 			{name: "configs", plan: plan.Configs},
 			{name: "services", plan: plan.Services},
 			{name: "executable_links", plan: plan.ExecutableLinks},
+			{name: "directories", plan: plan.Directories},
 		} {
 			_ = json.NewEncoder(output).Encode(map[string]any{
 				"stage":    stage.name,
@@ -848,6 +863,7 @@ func printPlan(output io.Writer, plan Plan, format string) {
 	printStage(output, "CONFIGS", plan.Configs)
 	printStage(output, "SERVICES", plan.Services)
 	printStage(output, "EXECUTABLE LINKS", plan.ExecutableLinks)
+	printStage(output, "DIRECTORIES", plan.Directories)
 }
 
 func printStage(output io.Writer, name string, plan StagePlan) {

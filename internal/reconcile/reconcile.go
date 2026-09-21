@@ -106,6 +106,9 @@ func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Opti
 		if resourcePlan.ExecutableLinks.Changes() > 0 || len(resourcePlan.ExecutableLinks.Declared) > 0 {
 			document.Stages = append(document.Stages, resourceStage("executable_links", resourcePlan.ExecutableLinks))
 		}
+		if resourcePlan.Directories.Changes() > 0 || len(resourcePlan.Directories.Declared) > 0 {
+			document.Stages = append(document.Stages, resourceStage("directories", resourcePlan.Directories))
+		}
 	}
 	for _, stage := range document.Stages {
 		document.Changes += len(stage.Changes)
@@ -1181,6 +1184,7 @@ func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resourc
 			{name: "GROUPS", plan: resourcePlan.Groups},
 			{name: "CONFIGS", plan: resourcePlan.Configs},
 			{name: "SERVICES", plan: resourcePlan.Services},
+			{name: "DIRECTORIES", plan: resourcePlan.Directories},
 		} {
 			if len(stage.plan.Extra) == 0 {
 				continue

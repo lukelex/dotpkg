@@ -214,6 +214,56 @@ func TestExecutableLinkCollectionLinksExecutablesAndPrunesDanglingPrefixLinks(t 
 	}
 }
 
+func TestDirectoryResourcesCreateAdoptAndCleanEmptyDirectories(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	manifestPath := filepath.Join(home, "packages.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`source: repo
+resources:
+  directories:
+    - $HOME/.ssh
+    - path: $HOME/projects
+      profiles: [desktop]
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Load(manifestPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := state.Load(filepath.Join(home, "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	system := &fakeSystem{groupExists: map[string]bool{}, services: map[string]bool{}, serviceState: map[string]bool{}}
+	options := Options{Profile: "desktop", RootPath: home, Yes: true}
+	if err := Sync(context.Background(), m, s, options, system); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{filepath.Join(home, ".ssh"), filepath.Join(home, "projects")} {
+		if info, err := os.Stat(directory); err != nil || !info.IsDir() {
+			t.Fatalf("directory %s: info=%v error=%v", directory, info, err)
+		}
+	}
+	emptyManifestPath := filepath.Join(home, "empty.yaml")
+	if err := os.WriteFile(emptyManifestPath, []byte("source: repo\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	emptyManifest, err := manifest.Load(emptyManifestPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Clean(context.Background(), emptyManifest, s, options, system); err != nil {
+		t.Fatal(err)
+	}
+	for _, directory := range []string{filepath.Join(home, ".ssh"), filepath.Join(home, "projects")} {
+		if _, err := os.Stat(directory); !os.IsNotExist(err) {
+			t.Fatalf("directory %s still exists: %v", directory, err)
+		}
+	}
+}
+
 func TestSyncAppliesResourcesAndTracksOwnership(t *testing.T) {
 	m, s, options, system := resourceFixture(t)
 	options.Yes = true
