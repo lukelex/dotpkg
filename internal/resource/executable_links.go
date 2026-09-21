@@ -129,7 +129,11 @@ func applyExecutableLinks(plan StagePlan, options Options, m *manifest.Manifest,
 			return err
 		}
 	}
-	for _, target := range plan.Extra {
+	return removeExecutableLinks(plan.Extra)
+}
+
+func removeExecutableLinks(targets []string) error {
+	for _, target := range targets {
 		info, err := os.Lstat(target)
 		if os.IsNotExist(err) {
 			continue

@@ -98,16 +98,10 @@ func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Opti
 		document.Host = options.HostPath
 	}
 	if resourcePlan != nil {
-		document.Stages = append(document.Stages,
-			resourceStage("groups", resourcePlan.Groups),
-			resourceStage("configs", resourcePlan.Configs),
-			resourceStage("services", resourcePlan.Services),
-		)
-		if resourcePlan.ExecutableLinks.Changes() > 0 || len(resourcePlan.ExecutableLinks.Declared) > 0 {
-			document.Stages = append(document.Stages, resourceStage("executable_links", resourcePlan.ExecutableLinks))
-		}
-		if resourcePlan.Directories.Changes() > 0 || len(resourcePlan.Directories.Declared) > 0 {
-			document.Stages = append(document.Stages, resourceStage("directories", resourcePlan.Directories))
+		for _, stage := range resourcePlan.Stages() {
+			if stage.IncludeEmpty || stage.Plan.Changes() > 0 || len(stage.Plan.Declared) > 0 {
+				document.Stages = append(document.Stages, resourceStage(stage.Name, stage.Plan))
+			}
 		}
 	}
 	for _, stage := range document.Stages {
@@ -1177,20 +1171,12 @@ func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resourc
 		}
 	}
 	if resourcePlan != nil {
-		for _, stage := range []struct {
-			name string
-			plan resource.StagePlan
-		}{
-			{name: "GROUPS", plan: resourcePlan.Groups},
-			{name: "CONFIGS", plan: resourcePlan.Configs},
-			{name: "SERVICES", plan: resourcePlan.Services},
-			{name: "DIRECTORIES", plan: resourcePlan.Directories},
-		} {
-			if len(stage.plan.Extra) == 0 {
+		for _, stage := range resourcePlan.Stages() {
+			if len(stage.Plan.Extra) == 0 {
 				continue
 			}
-			fmt.Fprintln(output, stage.name)
-			for _, item := range stage.plan.Extra {
+			fmt.Fprintln(output, stage.Label)
+			for _, item := range stage.Plan.Extra {
 				fmt.Fprintf(output, "  - remove: %s\n", item)
 			}
 		}

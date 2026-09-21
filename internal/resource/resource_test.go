@@ -158,6 +158,13 @@ func TestBuildPlanCoversGroupsConfigsAndServices(t *testing.T) {
 	if !reflect.DeepEqual(plan.Services.Adopted, []string{"docker"}) || !reflect.DeepEqual(plan.Services.Missing, []string{"user:desktop.service"}) {
 		t.Fatalf("services plan = %#v", plan.Services)
 	}
+	var names []string
+	for _, stage := range plan.Stages() {
+		names = append(names, stage.Name)
+	}
+	if !reflect.DeepEqual(names, []string{"groups", "configs", "services", "executable_links", "directories"}) {
+		t.Fatalf("resource stage order = %#v", names)
+	}
 }
 
 func TestExecutableLinkCollectionLinksExecutablesAndPrunesDanglingPrefixLinks(t *testing.T) {
