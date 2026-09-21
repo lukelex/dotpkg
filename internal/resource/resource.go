@@ -95,13 +95,17 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, option
 	return plan, nil
 }
 
-func CleanPlan(m *manifest.Manifest, s *state.State, options Options) Plan {
+func CleanPlan(m *manifest.Manifest, s *state.State, options Options) (Plan, error) {
 	options = normalize(options, m)
 	var plan Plan
 	for _, stage := range resourceStages() {
-		*stage.plan(&plan) = stage.cleanPlan(m, s, options)
+		planned, err := stage.cleanPlan(m, s, options)
+		if err != nil {
+			return Plan{}, err
+		}
+		*stage.plan(&plan) = planned
 	}
-	return plan
+	return plan, nil
 }
 
 // InspectConfig reports the filesystem state of a declared config mapping
@@ -183,7 +187,7 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		if err := stage.definition.apply(ctx, stage.plan, m, s, options, system); err != nil {
 			return err
 		}
-		items := append([]string{}, s.Items("managed", stage.definition.stateKey)...)
+		items := append([]string{}, s.Items(state.ManagedKey, stage.definition.stateKey)...)
 		items = subtract(items, stage.plan.Extra)
 		items = append(items, stage.plan.Adopted...)
 		items = append(items, stage.plan.Missing...)
@@ -193,7 +197,7 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 				return err
 			}
 		}
-		s.SetItems(items, "managed", stage.definition.stateKey)
+		s.SetItems(items, state.ManagedKey, stage.definition.stateKey)
 	}
 	return s.Write()
 }
@@ -202,13 +206,16 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 // declared. It never installs, enables, adopts, or replaces anything.
 func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) error {
 	options = normalize(options, m)
-	plan := CleanPlan(m, s, options)
+	plan, err := CleanPlan(m, s, options)
+	if err != nil {
+		return err
+	}
 	for _, stage := range resourceStages() {
 		stagePlan := stage.plan(&plan)
 		if err := stage.clean(ctx, *stagePlan, m, s, options, system); err != nil {
 			return err
 		}
-		s.SetItems(subtract(s.Items("managed", stage.stateKey), stagePlan.Extra), "managed", stage.stateKey)
+		s.SetItems(subtract(s.Items(state.ManagedKey, stage.stateKey), stagePlan.Extra), state.ManagedKey, stage.stateKey)
 	}
 	return s.Write()
 }

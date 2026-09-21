@@ -37,7 +37,7 @@ func planDirectories(m *manifest.Manifest, s *state.State, options Options) (Sta
 		return StagePlan{}, err
 	}
 	planned := StagePlan{Declared: declared}
-	tracked := s.Items("managed", "directories")
+	tracked := s.Items(state.ManagedKey, state.ManagedDirectories)
 	for _, directory := range declared {
 		info, err := os.Lstat(directory)
 		switch {

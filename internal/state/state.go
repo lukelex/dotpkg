@@ -25,7 +25,28 @@ type AppImage struct {
 	Version   string
 }
 
-const CurrentVersion = 1
+const (
+	CurrentVersion = 1
+
+	ManagedKey             = "managed"
+	ManagedPackages        = "packages"
+	ManagedPackageOrigins  = "package_origins"
+	ManagedAppImages       = "appimages"
+	ManagedGroups          = "groups"
+	ManagedConfigs         = "configs"
+	ManagedServices        = "services"
+	ManagedExecutableLinks = "executable_links"
+	ManagedDirectories     = "directories"
+)
+
+var managedListKeys = []string{
+	ManagedPackages,
+	ManagedGroups,
+	ManagedConfigs,
+	ManagedServices,
+	ManagedExecutableLinks,
+	ManagedDirectories,
+}
 
 func New(path string) *State {
 	return &State{Path: path, Data: defaultData()}
@@ -43,7 +64,7 @@ func Load(path string) (*State, error) {
 					packages = append(packages, packageName)
 				}
 			}
-			data["managed"].(map[string]any)["packages"] = packages
+			data[ManagedKey].(map[string]any)[ManagedPackages] = packages
 		}
 		return &State{Path: path, Data: data}, nil
 	}
@@ -91,24 +112,24 @@ func migrate(data map[string]any) (bool, error) {
 		data["current"] = map[string]any{}
 		migrated = true
 	}
-	managed, ok := data["managed"].(map[string]any)
+	managed, ok := data[ManagedKey].(map[string]any)
 	if !ok {
 		managed = map[string]any{}
-		data["managed"] = managed
+		data[ManagedKey] = managed
 		migrated = true
 	}
-	for _, name := range []string{"packages", "groups", "configs", "services", "executable_links", "directories"} {
+	for _, name := range managedListKeys {
 		if _, ok := managed[name]; !ok {
 			managed[name] = []any{}
 			migrated = true
 		}
 	}
-	if _, ok := managed["package_origins"]; !ok {
-		managed["package_origins"] = map[string]any{}
+	if _, ok := managed[ManagedPackageOrigins]; !ok {
+		managed[ManagedPackageOrigins] = map[string]any{}
 		migrated = true
 	}
-	if _, ok := managed["appimages"]; !ok {
-		managed["appimages"] = map[string]any{}
+	if _, ok := managed[ManagedAppImages]; !ok {
+		managed[ManagedAppImages] = map[string]any{}
 		migrated = true
 	}
 	data["version"] = CurrentVersion
@@ -143,7 +164,7 @@ func validate(data map[string]any) error {
 			return fmt.Errorf("current must be a mapping")
 		}
 	}
-	managed, ok := data["managed"]
+	managed, ok := data[ManagedKey]
 	if !ok {
 		return nil
 	}
@@ -151,14 +172,14 @@ func validate(data map[string]any) error {
 	if !ok {
 		return fmt.Errorf("managed must be a mapping")
 	}
-	for _, name := range []string{"packages", "groups", "configs", "services", "executable_links", "directories"} {
+	for _, name := range managedListKeys {
 		if value, exists := managedMap[name]; exists {
 			if err := validateStringList(value, "managed."+name); err != nil {
 				return err
 			}
 		}
 	}
-	if origins, exists := managedMap["package_origins"]; exists {
+	if origins, exists := managedMap[ManagedPackageOrigins]; exists {
 		originMap, ok := origins.(map[string]any)
 		if !ok {
 			return fmt.Errorf("managed.package_origins must be a mapping")
@@ -172,7 +193,7 @@ func validate(data map[string]any) error {
 			}
 		}
 	}
-	if appimages, exists := managedMap["appimages"]; exists {
+	if appimages, exists := managedMap[ManagedAppImages]; exists {
 		appimageMap, ok := appimages.(map[string]any)
 		if !ok {
 			return fmt.Errorf("managed.appimages must be a mapping")
@@ -212,15 +233,15 @@ func defaultData() map[string]any {
 	return map[string]any{
 		"version": 1,
 		"current": map[string]any{},
-		"managed": map[string]any{
-			"packages":         []any{},
-			"package_origins":  map[string]any{},
-			"appimages":        map[string]any{},
-			"groups":           []any{},
-			"configs":          []any{},
-			"services":         []any{},
-			"executable_links": []any{},
-			"directories":      []any{},
+		ManagedKey: map[string]any{
+			ManagedPackages:        []any{},
+			ManagedPackageOrigins:  map[string]any{},
+			ManagedAppImages:       map[string]any{},
+			ManagedGroups:          []any{},
+			ManagedConfigs:         []any{},
+			ManagedServices:        []any{},
+			ManagedExecutableLinks: []any{},
+			ManagedDirectories:     []any{},
 		},
 	}
 }
@@ -263,15 +284,15 @@ func (s *State) Selection(path ...string) (bool, bool) {
 }
 
 func (s *State) Packages() []string {
-	return s.Items("managed", "packages")
+	return s.Items(ManagedKey, ManagedPackages)
 }
 
 func (s *State) SetPackages(packages []string) {
-	s.SetItems(packages, "managed", "packages")
+	s.SetItems(packages, ManagedKey, ManagedPackages)
 }
 
 func (s *State) PackageOrigins() map[string]string {
-	value, ok := s.Get("managed", "package_origins")
+	value, ok := s.Get(ManagedKey, ManagedPackageOrigins)
 	if !ok {
 		return map[string]string{}
 	}
@@ -295,11 +316,11 @@ func (s *State) SetPackageOrigins(origins map[string]string) {
 			values[packageName] = origin
 		}
 	}
-	s.Set(values, "managed", "package_origins")
+	s.Set(values, ManagedKey, ManagedPackageOrigins)
 }
 
 func (s *State) AppImages() map[string]AppImage {
-	value, ok := s.Get("managed", "appimages")
+	value, ok := s.Get(ManagedKey, ManagedAppImages)
 	if !ok {
 		return map[string]AppImage{}
 	}
@@ -341,7 +362,7 @@ func (s *State) SetAppImages(images map[string]AppImage) {
 		}
 		values[name] = value
 	}
-	s.Set(values, "managed", "appimages")
+	s.Set(values, ManagedKey, ManagedAppImages)
 }
 
 func (s *State) Items(path ...string) []string {

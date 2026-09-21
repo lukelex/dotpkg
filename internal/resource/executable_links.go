@@ -40,16 +40,16 @@ func executableLinkSources(m *manifest.Manifest, s *state.State, options Options
 	return links, nil
 }
 
-func declaredExecutableLinks(m *manifest.Manifest, s *state.State, options Options) []string {
+func declaredExecutableLinks(m *manifest.Manifest, s *state.State, options Options) ([]string, error) {
 	links, err := executableLinkSources(m, s, options)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	declared := make([]string, 0, len(links))
 	for target := range links {
 		declared = append(declared, target)
 	}
-	return unique(declared)
+	return unique(declared), nil
 }
 
 func planExecutableLinks(m *manifest.Manifest, s *state.State, options Options) (StagePlan, error) {
@@ -61,7 +61,7 @@ func planExecutableLinks(m *manifest.Manifest, s *state.State, options Options) 
 	for target := range desired {
 		planned.Declared = append(planned.Declared, target)
 	}
-	tracked := s.Items("managed", "executable_links")
+	tracked := s.Items(state.ManagedKey, state.ManagedExecutableLinks)
 	for target, source := range desired {
 		matches, err := executableLinkMatches(target, source)
 		if err != nil {

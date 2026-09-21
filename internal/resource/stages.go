@@ -17,7 +17,7 @@ type resourceStage struct {
 	includeEmpty bool
 	plan         func(*Plan) *StagePlan
 	build        func(context.Context, *manifest.Manifest, *state.State, Options, System) (StagePlan, error)
-	cleanPlan    func(*manifest.Manifest, *state.State, Options) StagePlan
+	cleanPlan    func(*manifest.Manifest, *state.State, Options) (StagePlan, error)
 	apply        func(context.Context, StagePlan, *manifest.Manifest, *state.State, Options, System) error
 	clean        func(context.Context, StagePlan, *manifest.Manifest, *state.State, Options, System) error
 }
@@ -34,14 +34,14 @@ type NamedStage struct {
 func resourceStages() []resourceStage {
 	return []resourceStage{
 		{
-			name: "groups", label: "GROUPS", stateKey: "groups", includeEmpty: true,
+			name: "groups", label: "GROUPS", stateKey: state.ManagedGroups, includeEmpty: true,
 			plan: func(plan *Plan) *StagePlan { return &plan.Groups },
 			build: func(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (StagePlan, error) {
 				return planGroups(ctx, m, s, options, system)
 			},
-			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) StagePlan {
+			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) (StagePlan, error) {
 				declared := declaredMetadata(m, s, options.Profile, "groups")
-				return StagePlan{Declared: declared, Extra: subtract(s.Items("managed", "groups"), declared)}
+				return StagePlan{Declared: declared, Extra: subtract(s.Items(state.ManagedKey, state.ManagedGroups), declared)}, nil
 			},
 			apply: func(ctx context.Context, plan StagePlan, _ *manifest.Manifest, _ *state.State, options Options, system System) error {
 				return applyGroups(ctx, plan, options, system)
@@ -51,14 +51,14 @@ func resourceStages() []resourceStage {
 			},
 		},
 		{
-			name: "configs", label: "CONFIGS", stateKey: "configs", includeEmpty: true,
+			name: "configs", label: "CONFIGS", stateKey: state.ManagedConfigs, includeEmpty: true,
 			plan: func(plan *Plan) *StagePlan { return &plan.Configs },
 			build: func(_ context.Context, m *manifest.Manifest, s *state.State, options Options, _ System) (StagePlan, error) {
 				return planConfigs(m, s, options)
 			},
-			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) StagePlan {
+			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) (StagePlan, error) {
 				declared := declaredMetadata(m, s, options.Profile, "configs")
-				return StagePlan{Declared: declared, Extra: subtract(s.Items("managed", "configs"), declared)}
+				return StagePlan{Declared: declared, Extra: subtract(s.Items(state.ManagedKey, state.ManagedConfigs), declared)}, nil
 			},
 			apply: func(_ context.Context, plan StagePlan, _ *manifest.Manifest, _ *state.State, options Options, _ System) error {
 				return applyConfigs(plan, options)
@@ -71,14 +71,14 @@ func resourceStages() []resourceStage {
 			},
 		},
 		{
-			name: "services", label: "SERVICES", stateKey: "services", includeEmpty: true,
+			name: "services", label: "SERVICES", stateKey: state.ManagedServices, includeEmpty: true,
 			plan: func(plan *Plan) *StagePlan { return &plan.Services },
 			build: func(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (StagePlan, error) {
 				return planServices(ctx, m, s, options, system, true)
 			},
-			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) StagePlan {
+			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) (StagePlan, error) {
 				declared := declaredServices(m, s, options.Profile)
-				return StagePlan{Declared: declared, Extra: subtract(s.Items("managed", "services"), declared)}
+				return StagePlan{Declared: declared, Extra: subtract(s.Items(state.ManagedKey, state.ManagedServices), declared)}, nil
 			},
 			apply: func(ctx context.Context, plan StagePlan, _ *manifest.Manifest, _ *state.State, options Options, system System) error {
 				return applyServices(ctx, plan, options, system)
@@ -88,13 +88,17 @@ func resourceStages() []resourceStage {
 			},
 		},
 		{
-			name: "executable_links", label: "EXECUTABLE LINKS", stateKey: "executable_links",
+			name: "executable_links", label: "EXECUTABLE LINKS", stateKey: state.ManagedExecutableLinks,
 			plan: func(plan *Plan) *StagePlan { return &plan.ExecutableLinks },
 			build: func(_ context.Context, m *manifest.Manifest, s *state.State, options Options, _ System) (StagePlan, error) {
 				return planExecutableLinks(m, s, options)
 			},
-			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) StagePlan {
-				return StagePlan{Extra: subtract(s.Items("managed", "executable_links"), declaredExecutableLinks(m, s, options))}
+			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) (StagePlan, error) {
+				declared, err := declaredExecutableLinks(m, s, options)
+				if err != nil {
+					return StagePlan{}, err
+				}
+				return StagePlan{Extra: subtract(s.Items(state.ManagedKey, state.ManagedExecutableLinks), declared)}, nil
 			},
 			apply: func(_ context.Context, plan StagePlan, m *manifest.Manifest, s *state.State, options Options, _ System) error {
 				return applyExecutableLinks(plan, options, m, s)
@@ -104,13 +108,17 @@ func resourceStages() []resourceStage {
 			},
 		},
 		{
-			name: "directories", label: "DIRECTORIES", stateKey: "directories",
+			name: "directories", label: "DIRECTORIES", stateKey: state.ManagedDirectories,
 			plan: func(plan *Plan) *StagePlan { return &plan.Directories },
 			build: func(_ context.Context, m *manifest.Manifest, s *state.State, options Options, _ System) (StagePlan, error) {
 				return planDirectories(m, s, options)
 			},
-			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) StagePlan {
-				return StagePlan{Extra: subtract(s.Items("managed", "directories"), cleanDeclaredDirectories(m, s, options))}
+			cleanPlan: func(m *manifest.Manifest, s *state.State, options Options) (StagePlan, error) {
+				declared, err := declaredDirectories(m, s, options)
+				if err != nil {
+					return StagePlan{}, err
+				}
+				return StagePlan{Extra: subtract(s.Items(state.ManagedKey, state.ManagedDirectories), declared)}, nil
 			},
 			apply: func(_ context.Context, plan StagePlan, _ *manifest.Manifest, _ *state.State, _ Options, _ System) error {
 				if err := applyDirectories(plan); err != nil {

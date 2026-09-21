@@ -12,7 +12,7 @@ import (
 func planConfigs(m *manifest.Manifest, s *state.State, options Options) (StagePlan, error) {
 	declared := declaredMetadata(m, s, options.Profile, "configs")
 	planned := StagePlan{Declared: declared}
-	tracked := s.Items("managed", "configs")
+	tracked := s.Items(state.ManagedKey, state.ManagedConfigs)
 	trackedSet := stringSet(tracked)
 	for _, mapping := range declared {
 		source, target, err := configPaths(mapping, options)

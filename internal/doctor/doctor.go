@@ -78,7 +78,7 @@ func Run(ctx context.Context, m *manifest.Manifest, s *state.State, options reco
 
 	resourceSystem, ok := system.(resource.System)
 	if !ok {
-		report.add("warning", "resources", "backend does not provide group, config, or service diagnostics")
+		report.add("warning", "resources", "backend does not provide group, config, service, executable-link, or directory diagnostics")
 		return report.sorted()
 	}
 	resourceOptions := resource.Options{
@@ -126,6 +126,18 @@ func Run(ctx context.Context, m *manifest.Manifest, s *state.State, options reco
 	}
 	for _, service := range resourcePlan.Services.Extra {
 		report.add("warning", "services", fmt.Sprintf("managed service is no longer declared: %s", service))
+	}
+	for _, target := range resourcePlan.ExecutableLinks.Missing {
+		report.add("error", "executable_links", fmt.Sprintf("executable link is missing or conflicts with the manifest link: %s", target))
+	}
+	for _, target := range resourcePlan.ExecutableLinks.Extra {
+		report.add("warning", "executable_links", fmt.Sprintf("managed executable link is no longer declared: %s", target))
+	}
+	for _, directory := range resourcePlan.Directories.Missing {
+		report.add("error", "directories", fmt.Sprintf("declared directory is missing: %s", directory))
+	}
+	for _, directory := range resourcePlan.Directories.Extra {
+		report.add("warning", "directories", fmt.Sprintf("managed directory is no longer declared: %s", directory))
 	}
 	return report.sorted()
 }

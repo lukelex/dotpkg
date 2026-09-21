@@ -24,14 +24,14 @@ func planGroups(ctx context.Context, m *manifest.Manifest, s *state.State, optio
 			continue
 		}
 		if _, present := currentSet[group]; present {
-			if !contains(s.Items("managed", "groups"), group) {
+			if !contains(s.Items(state.ManagedKey, state.ManagedGroups), group) {
 				planned.Adopted = append(planned.Adopted, group)
 			}
 		} else {
 			planned.Missing = append(planned.Missing, group)
 		}
 	}
-	planned.Extra = subtract(s.Items("managed", "groups"), declared)
+	planned.Extra = subtract(s.Items(state.ManagedKey, state.ManagedGroups), declared)
 	return sortPlan(planned), nil
 }
 

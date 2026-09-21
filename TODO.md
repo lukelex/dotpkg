@@ -11,12 +11,12 @@
   `internal/resource/resource.go`; remove positional service-stage handling.
 - [x] Share user-path expansion and containment validation between config and
   directory resources.
-- [ ] Make resource clean-plan construction report declaration/discovery
+- [x] Make resource clean-plan construction report declaration/discovery
   failures rather than suppressing them.
-- [ ] Extend `doctor` with executable-link and directory diagnostics.
-- [ ] Centralize managed-state list keys in `internal/state`.
-- [ ] Split package sync, clean, and plan rendering from
-  `internal/reconcile/reconcile.go`.
+- [x] Extend `doctor` with executable-link and directory diagnostics.
+- [x] Centralize managed-state list keys in `internal/state`.
+- [ ] Split package sync and clean from `internal/reconcile/reconcile.go`.
+  - [x] Move plan-document and text rendering to `plan.go`.
 
 Do not introduce a generic resource abstraction that erases resource-specific
 safety rules. Prefer a shared orchestration registry and focused resource

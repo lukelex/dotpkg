@@ -271,6 +271,30 @@ resources:
 	}
 }
 
+func TestCleanPlanReportsMissingExecutableLinkSource(t *testing.T) {
+	directory := t.TempDir()
+	manifestPath := filepath.Join(directory, "packages.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`source: repo
+resources:
+  executable_links:
+    - source: linux/scripts
+      target: /usr/local/bin
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Load(manifestPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := state.Load(filepath.Join(directory, "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CleanPlan(m, s, Options{RootPath: directory}); err == nil || !strings.Contains(err.Error(), "read executable link source") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func TestSyncAppliesResourcesAndTracksOwnership(t *testing.T) {
 	m, s, options, system := resourceFixture(t)
 	options.Yes = true

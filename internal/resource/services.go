@@ -14,7 +14,7 @@ func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, opt
 	declared := declaredServices(m, s, options.Profile)
 	configs := declaredMetadata(m, s, options.Profile, "configs")
 	planned := StagePlan{Declared: declared}
-	trackedSet := stringSet(s.Items("managed", "services"))
+	trackedSet := stringSet(s.Items(state.ManagedKey, state.ManagedServices))
 	for _, service := range declared {
 		userService, name := strings.HasPrefix(service, "user:"), strings.TrimPrefix(service, "user:")
 		exists, err := system.ServiceExists(ctx, userService, name)
@@ -39,7 +39,7 @@ func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, opt
 			planned.Missing = append(planned.Missing, service)
 		}
 	}
-	planned.Extra = subtract(s.Items("managed", "services"), declared)
+	planned.Extra = subtract(s.Items(state.ManagedKey, state.ManagedServices), declared)
 	return sortPlan(planned), nil
 }
 
