@@ -65,15 +65,16 @@ func (p StagePlan) Changes() int {
 }
 
 type Plan struct {
-	Groups   StagePlan
-	Configs  StagePlan
-	Services StagePlan
+	Groups          StagePlan
+	Configs         StagePlan
+	Services        StagePlan
+	ExecutableLinks StagePlan
 }
 
 var errConfigConflict = errors.New("config target conflict")
 
 func (p Plan) Changes() int {
-	return p.Groups.Changes() + p.Configs.Changes() + p.Services.Changes()
+	return p.Groups.Changes() + p.Configs.Changes() + p.Services.Changes() + p.ExecutableLinks.Changes()
 }
 
 func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (Plan, error) {
@@ -90,7 +91,11 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, option
 	if err != nil {
 		return Plan{}, err
 	}
-	return Plan{Groups: groups, Configs: configs, Services: services}, nil
+	executableLinks, err := planExecutableLinks(m, s, options)
+	if err != nil {
+		return Plan{}, err
+	}
+	return Plan{Groups: groups, Configs: configs, Services: services, ExecutableLinks: executableLinks}, nil
 }
 
 func CleanPlan(m *manifest.Manifest, s *state.State, options Options) Plan {
@@ -107,6 +112,9 @@ func CleanPlan(m *manifest.Manifest, s *state.State, options Options) Plan {
 		Services: StagePlan{
 			Declared: declaredServices(m, s, options.Profile),
 			Extra:    subtract(s.Items("managed", "services"), declaredServices(m, s, options.Profile)),
+		},
+		ExecutableLinks: StagePlan{
+			Extra: subtract(s.Items("managed", "executable_links"), declaredExecutableLinks(m, s, options)),
 		},
 	}
 }
@@ -168,6 +176,7 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		{name: "groups", plan: plan.Groups, apply: func(p StagePlan) error { return applyGroups(ctx, p, options, system) }, path: []string{"managed", "groups"}},
 		{name: "configs", plan: plan.Configs, apply: func(p StagePlan) error { return applyConfigs(p, options) }, path: []string{"managed", "configs"}},
 		{name: "services", plan: plan.Services, apply: func(p StagePlan) error { return applyServices(ctx, p, options, system) }, path: []string{"managed", "services"}},
+		{name: "executable_links", plan: plan.ExecutableLinks, apply: func(p StagePlan) error { return applyExecutableLinks(p, options, m, s) }, path: []string{"managed", "executable_links"}},
 	}
 	for index := range stages {
 		stage := &stages[index]
@@ -219,6 +228,7 @@ func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Op
 	groups := plan.Groups.Extra
 	configs := plan.Configs.Extra
 	services := plan.Services.Extra
+	executableLinks := plan.ExecutableLinks.Extra
 
 	if len(groups) > 0 {
 		currentGroups, err := system.CurrentGroups(ctx, options.User)
@@ -249,6 +259,13 @@ func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Op
 			}
 		}
 	}
+	for _, target := range executableLinks {
+		if info, err := os.Lstat(target); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			if err := os.Remove(target); err != nil {
+				return fmt.Errorf("remove executable link %s: %w", target, err)
+			}
+		}
+	}
 	if len(configs) > 0 {
 		if err := reloadForDeclaredConfigs(ctx, configs, options, system); err != nil {
 			return err
@@ -269,6 +286,7 @@ func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Op
 	}
 	s.SetItems(subtract(s.Items("managed", "groups"), groups), "managed", "groups")
 	s.SetItems(subtract(s.Items("managed", "configs"), configs), "managed", "configs")
+	s.SetItems(subtract(s.Items("managed", "executable_links"), executableLinks), "managed", "executable_links")
 	s.SetItems(subtract(s.Items("managed", "services"), services), "managed", "services")
 	return s.Write()
 }
@@ -814,6 +832,7 @@ func printPlan(output io.Writer, plan Plan, format string) {
 			{name: "groups", plan: plan.Groups},
 			{name: "configs", plan: plan.Configs},
 			{name: "services", plan: plan.Services},
+			{name: "executable_links", plan: plan.ExecutableLinks},
 		} {
 			_ = json.NewEncoder(output).Encode(map[string]any{
 				"stage":    stage.name,
@@ -828,6 +847,7 @@ func printPlan(output io.Writer, plan Plan, format string) {
 	printStage(output, "GROUPS", plan.Groups)
 	printStage(output, "CONFIGS", plan.Configs)
 	printStage(output, "SERVICES", plan.Services)
+	printStage(output, "EXECUTABLE LINKS", plan.ExecutableLinks)
 }
 
 func printStage(output io.Writer, name string, plan StagePlan) {

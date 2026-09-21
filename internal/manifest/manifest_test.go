@@ -184,6 +184,27 @@ common:
 	}
 }
 
+func TestExecutableLinkPrefixIsOptional(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages.yaml")
+	contents := []byte(`source: repo
+resources:
+  executable_links:
+    - source: linux/scripts
+      target: /usr/local/bin
+`)
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	links := m.ExecutableLinkCollections("desktop", nil)
+	if len(links) != 1 || links[0].Prefix != "" {
+		t.Fatalf("executable links = %#v", links)
+	}
+}
+
 func TestAppImagePackageMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "packages.yaml")
 	contents := []byte(`source: repo

@@ -130,7 +130,7 @@ by the Debian and Fedora backends.
 ## Custom resources
 
 Resource metadata may be attached to packages or declared independently. Use
-explicit resources for configuration links and services that are not owned by
+explicit resources for configuration links, executable links, and services that are not owned by
 a package:
 
 ```yaml
@@ -145,6 +145,11 @@ resources:
       scope: user
       profiles: [desktop]
       selections: [i3]
+  executable_links:
+    - source: linux/scripts
+      target: /usr/local/bin
+      prefix: u_
+      prune: true
 ```
 
 `profiles` and `selections` are optional. A resource is declared only when its
@@ -152,6 +157,11 @@ profile matches and every listed selection is enabled. Service scopes are
 `system` or `user`; user services are tracked as `user:<name>` in state. Unit
 files linked under systemd directories trigger the appropriate daemon reload,
 and system service changes run through `sudo`.
+
+Executable-link collections link executable files from a source directory into
+the target directory. `prefix` is optional and defaults to empty; `prune: true`
+removes stale dangling symlinks with the collection prefix. Existing conflicting
+targets are preserved unless `--replace` is supplied.
 
 Manifest fields consumed by dotpkg are structurally validated before planning.
 Unknown metadata is preserved for compatibility with the surrounding dotfiles

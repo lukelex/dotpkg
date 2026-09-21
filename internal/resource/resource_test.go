@@ -160,6 +160,60 @@ func TestBuildPlanCoversGroupsConfigsAndServices(t *testing.T) {
 	}
 }
 
+func TestExecutableLinkCollectionLinksExecutablesAndPrunesDanglingPrefixLinks(t *testing.T) {
+	directory := t.TempDir()
+	sourceDir := filepath.Join(directory, "linux", "scripts")
+	targetDir := filepath.Join(directory, "bin")
+	if err := os.MkdirAll(sourceDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := filepath.Join(sourceDir, "tool")
+	if err := os.WriteFile(source, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing", filepath.Join(targetDir, "u_old")); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(directory, "packages.yaml")
+	contents := "source: repo\nresources:\n  executable_links:\n    - source: linux/scripts\n      target: " + targetDir + "\n      prefix: u_\n      prune: true\n"
+	if err := os.WriteFile(manifestPath, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Load(manifestPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := state.Load(filepath.Join(directory, "state.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	options := Options{Profile: "server", RootPath: directory, Yes: true}
+	system := &fakeSystem{groupExists: map[string]bool{}, services: map[string]bool{}, serviceState: map[string]bool{}}
+	plan, err := BuildPlan(context.Background(), m, s, options, system)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{filepath.Join(targetDir, "u_tool"), filepath.Join(targetDir, "u_old")}
+	if !reflect.DeepEqual(plan.ExecutableLinks.Extra, []string{want[1]}) || !reflect.DeepEqual(plan.ExecutableLinks.Missing, []string{want[0]}) {
+		t.Fatalf("executable link plan = %#v", plan.ExecutableLinks)
+	}
+	if err := Sync(context.Background(), m, s, options, system); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := os.Readlink(want[0]); err != nil || got != source {
+		t.Fatalf("executable link = %q, error = %v", got, err)
+	}
+	if _, err := os.Lstat(want[1]); !os.IsNotExist(err) {
+		t.Fatalf("stale executable link still exists: %v", err)
+	}
+	if got := s.Items("managed", "executable_links"); !reflect.DeepEqual(got, []string{want[0]}) {
+		t.Fatalf("managed executable links = %#v", got)
+	}
+}
+
 func TestSyncAppliesResourcesAndTracksOwnership(t *testing.T) {
 	m, s, options, system := resourceFixture(t)
 	options.Yes = true

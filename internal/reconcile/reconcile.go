@@ -103,6 +103,9 @@ func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Opti
 			resourceStage("configs", resourcePlan.Configs),
 			resourceStage("services", resourcePlan.Services),
 		)
+		if resourcePlan.ExecutableLinks.Changes() > 0 || len(resourcePlan.ExecutableLinks.Declared) > 0 {
+			document.Stages = append(document.Stages, resourceStage("executable_links", resourcePlan.ExecutableLinks))
+		}
 	}
 	for _, stage := range document.Stages {
 		document.Changes += len(stage.Changes)

@@ -301,6 +301,42 @@ func validateResources(value any) error {
 			return err
 		}
 	}
+	if links, ok := resources["executable_links"]; ok {
+		if err := validateExecutableLinks(links); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateExecutableLinks(value any) error {
+	items, ok := value.([]any)
+	if !ok {
+		return fmt.Errorf("resources.executable_links must be a list")
+	}
+	for index, item := range items {
+		path := fmt.Sprintf("resources.executable_links[%d]", index)
+		mapping, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s must be a mapping", path)
+		}
+		for _, field := range []string{"source", "target"} {
+			if value, ok := mapping[field].(string); !ok || value == "" {
+				return fmt.Errorf("%s.%s must be a non-empty string", path, field)
+			}
+		}
+		if prefix, ok := mapping["prefix"]; ok {
+			if _, ok := prefix.(string); !ok {
+				return fmt.Errorf("%s.prefix must be a string", path)
+			}
+		}
+		if prune, ok := mapping["prune"]; ok && !isBoolean(prune) {
+			return fmt.Errorf("%s.prune must be a boolean", path)
+		}
+		if err := validateFilters(mapping, path); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -610,6 +646,45 @@ func (m *Manifest) ResourceConfigs(profile string, selections map[string]bool) [
 		}
 	}
 	return uniqueStrings(result)
+}
+
+// ExecutableLinkCollection describes a directory whose executable files are
+// linked into a target directory.
+type ExecutableLinkCollection struct {
+	Source string
+	Target string
+	Prefix string
+	Prune  bool
+}
+
+func (m *Manifest) ExecutableLinkCollections(profile string, selections map[string]bool) []ExecutableLinkCollection {
+	resources, ok := m.Data["resources"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	items, ok := resources["executable_links"].([]any)
+	if !ok {
+		return nil
+	}
+	var result []ExecutableLinkCollection
+	for _, item := range items {
+		mapping, ok := item.(map[string]any)
+		if !ok || !resourceSelected(mapping, profile, selections) {
+			continue
+		}
+		collection := ExecutableLinkCollection{Prefix: ""}
+		collection.Source, _ = mapping["source"].(string)
+		collection.Target, _ = mapping["target"].(string)
+		collection.Prefix, _ = mapping["prefix"].(string)
+		switch prune := mapping["prune"].(type) {
+		case bool:
+			collection.Prune = prune
+		case string:
+			collection.Prune = strings.EqualFold(prune, "yes") || strings.EqualFold(prune, "true")
+		}
+		result = append(result, collection)
+	}
+	return result
 }
 
 // ResourceServices returns explicit services that are not attached to a
