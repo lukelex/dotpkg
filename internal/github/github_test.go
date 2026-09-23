@@ -83,6 +83,43 @@ func TestInstallRejectsChecksumTraversalAndSymlinks(t *testing.T) {
 	}
 }
 
+func TestReadTarIgnoresPAXMetadataWhenSelectingArchiveRoot(t *testing.T) {
+	archive := tarGzip(t, map[string]tarFile{
+		"pax_global_header":                       {typeflag: tar.TypeXGlobalHeader},
+		"hunk-4845407/bin/hunk-pager":             {contents: []byte("pager"), mode: 0o755},
+		"hunk-4845407/bin/git-hunk":               {contents: []byte("git-hunk"), mode: 0o755},
+		"hunk-4845407/share/hunk/delta.gitconfig": {contents: []byte("[delta]"), mode: 0o644},
+	})
+	entries, err := readArchive(writeArchive(t, archive), []File{
+		{Source: "bin/hunk-pager"},
+		{Source: "bin/git-hunk"},
+		{Source: "share/hunk/delta.gitconfig"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for source, want := range map[string]string{
+		"bin/hunk-pager":             "pager",
+		"bin/git-hunk":               "git-hunk",
+		"share/hunk/delta.gitconfig": "[delta]",
+	} {
+		if got := string(entries[source].contents); got != want {
+			t.Fatalf("%s = %q, want %q", source, got, want)
+		}
+	}
+}
+
+func TestReadTarRejectsGenuinelyMultipleRoots(t *testing.T) {
+	archive := tarGzip(t, map[string]tarFile{
+		"first/bin/tool":  {contents: []byte("first"), mode: 0o755},
+		"second/bin/tool": {contents: []byte("second"), mode: 0o755},
+	})
+	_, err := readArchive(writeArchive(t, archive), []File{{Source: "bin/tool"}})
+	if err == nil || !strings.Contains(err.Error(), "one top-level directory") {
+		t.Fatalf("multiple root error = %v", err)
+	}
+}
+
 func TestInstallRefusesUnmanagedAndModifiedTargets(t *testing.T) {
 	archive := tarGzip(t, map[string]tarFile{"root/bin/tool": {contents: []byte("one"), mode: 0o755}})
 	home := t.TempDir()
@@ -136,6 +173,7 @@ type tarFile struct {
 	contents []byte
 	mode     int64
 	link     string
+	typeflag byte
 }
 
 func tarGzip(t *testing.T, files map[string]tarFile) []byte {
@@ -144,7 +182,11 @@ func tarGzip(t *testing.T, files map[string]tarFile) []byte {
 	writer := gzip.NewWriter(&result)
 	tarWriter := tar.NewWriter(writer)
 	for name, file := range files {
-		header := &tar.Header{Name: name, Mode: file.mode, Size: int64(len(file.contents)), Typeflag: tar.TypeReg}
+		typeflag := file.typeflag
+		if typeflag == 0 {
+			typeflag = tar.TypeReg
+		}
+		header := &tar.Header{Name: name, Mode: file.mode, Size: int64(len(file.contents)), Typeflag: typeflag}
 		if file.link != "" {
 			header.Typeflag, header.Linkname, header.Size = tar.TypeSymlink, file.link, 0
 		}

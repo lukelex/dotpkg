@@ -343,6 +343,9 @@ func readTar(reader *tar.Reader, requested []File) (map[string]archiveEntry, err
 		if err != nil {
 			return nil, err
 		}
+		if tarMetadataHeader(header.Typeflag) {
+			continue
+		}
 		name, err := archiveName(header.Name)
 		if err != nil {
 			return nil, err
@@ -363,6 +366,10 @@ func readTar(reader *tar.Reader, requested []File) (map[string]archiveEntry, err
 		entries[name] = archiveEntry{contents: body, mode: header.FileInfo().Mode()}
 	}
 	return selectEntries(entries, requested)
+}
+
+func tarMetadataHeader(typeflag byte) bool {
+	return typeflag == tar.TypeXGlobalHeader || typeflag == tar.TypeXHeader
 }
 
 func readZip(name string, requested []File) (map[string]archiveEntry, error) {
