@@ -13,6 +13,7 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/appimage"
 	"github.com/lukelex/dotpkg/internal/backend"
+	githubsource "github.com/lukelex/dotpkg/internal/github"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/resource"
 	"github.com/lukelex/dotpkg/internal/state"
@@ -32,6 +33,7 @@ type Options struct {
 	RestartServices bool
 	ResourceSystem  resource.System
 	AppImageSystem  appimage.System
+	GitHubSystem    githubsource.System
 	Input           io.Reader
 	Output          io.Writer
 	OutputFormat    string
@@ -50,6 +52,14 @@ type AppImagePlan struct {
 	Artifacts map[string]appimage.Artifact
 	Records   map[string]appimage.Record
 	Previous  map[string]appimage.Record
+}
+
+type GitHubPlan struct {
+	Plan
+	Specs     map[string]githubsource.Spec
+	Artifacts map[string]githubsource.Artifact
+	Records   map[string]githubsource.Record
+	Previous  map[string]githubsource.Record
 }
 
 // ConfigDir returns dotpkg's per-user configuration directory.
@@ -419,10 +429,151 @@ func packageManagerPackages(m *manifest.Manifest, profile string, s *state.State
 	result := make([]string, 0, len(declared))
 	for _, packageName := range declared {
 		if _, appImage := m.AppImage(packageName); !appImage {
+			if _, github := m.GitHub(packageName); github {
+				continue
+			}
 			result = append(result, packageName)
 		}
 	}
 	return result
+}
+
+func BuildGitHubPlan(ctx context.Context, m *manifest.Manifest, s *state.State, profile string, system githubsource.System) (GitHubPlan, error) {
+	paths := PackageCategories(m, profile, true, s)
+	declaredSpecs := m.GitHubs(paths)
+	plan := GitHubPlan{
+		Plan:      Plan{Declared: make([]string, 0, len(declaredSpecs))},
+		Specs:     make(map[string]githubsource.Spec, len(declaredSpecs)),
+		Artifacts: make(map[string]githubsource.Artifact, len(declaredSpecs)),
+		Records:   make(map[string]githubsource.Record, len(declaredSpecs)),
+		Previous:  make(map[string]githubsource.Record),
+	}
+	tracked := s.GitHubArtifacts()
+	for name, record := range tracked {
+		plan.Previous[name] = stateGitHubRecord(name, record)
+	}
+	for _, spec := range declaredSpecs {
+		converted := githubSpec(spec)
+		plan.Declared = append(plan.Declared, spec.Name)
+		plan.Specs[spec.Name] = converted
+		artifact, err := system.Resolve(ctx, converted)
+		if err != nil {
+			return plan, err
+		}
+		plan.Artifacts[spec.Name] = artifact
+		previous, tracked := plan.Previous[spec.Name]
+		if !tracked {
+			plan.Missing = append(plan.Missing, spec.Name)
+			continue
+		}
+		if !sameGitHubArtifact(previous, artifact, converted) {
+			plan.Missing = append(plan.Missing, spec.Name)
+			continue
+		}
+		record := previous
+		plan.Records[spec.Name] = record
+		installed, err := system.Installed(ctx, record)
+		if err != nil {
+			return plan, err
+		}
+		if installed {
+			continue
+		}
+		plan.Missing = append(plan.Missing, spec.Name)
+	}
+	declaredSet := make(map[string]struct{}, len(plan.Declared))
+	for _, name := range plan.Declared {
+		declaredSet[name] = struct{}{}
+	}
+	for name := range tracked {
+		if _, declared := declaredSet[name]; !declared {
+			plan.Extra = append(plan.Extra, name)
+		}
+	}
+	sort.Strings(plan.Declared)
+	sort.Strings(plan.Adopted)
+	sort.Strings(plan.Missing)
+	sort.Strings(plan.Extra)
+	return plan, nil
+}
+
+func BuildGitHubCleanPlan(m *manifest.Manifest, s *state.State, profile string) GitHubPlan {
+	plan := GitHubPlan{Plan: Plan{}, Previous: make(map[string]githubsource.Record)}
+	for _, spec := range m.GitHubs(PackageCategories(m, profile, true, s)) {
+		plan.Declared = append(plan.Declared, spec.Name)
+	}
+	for name, record := range s.GitHubArtifacts() {
+		plan.Previous[name] = stateGitHubRecord(name, record)
+	}
+	declared := make(map[string]struct{}, len(plan.Declared))
+	for _, name := range plan.Declared {
+		declared[name] = struct{}{}
+	}
+	for name := range plan.Previous {
+		if _, ok := declared[name]; !ok {
+			plan.Extra = append(plan.Extra, name)
+		}
+	}
+	sort.Strings(plan.Declared)
+	sort.Strings(plan.Extra)
+	return plan
+}
+
+func githubSpec(spec manifest.GitHubSpec) githubsource.Spec {
+	result := githubsource.Spec{Name: spec.Name, Repo: spec.Repo, Ref: spec.Ref, Archive: spec.Archive, Sha256: spec.Sha256, Files: make([]githubsource.File, 0, len(spec.Files))}
+	for _, file := range spec.Files {
+		result.Files = append(result.Files, githubsource.File{Source: file.Source, Target: file.Target})
+	}
+	return result
+}
+
+func stateGitHubRecord(name string, artifact state.GitHubArtifact) githubsource.Record {
+	record := githubsource.Record{Name: name, Repo: artifact.Repo, Ref: artifact.Ref, Archive: artifact.Archive, Sha256: artifact.Sha256, Files: make([]githubsource.InstalledFile, 0, len(artifact.Files))}
+	for _, file := range artifact.Files {
+		record.Files = append(record.Files, githubsource.InstalledFile{Source: file.Source, Target: file.Target, Digest: file.Digest})
+	}
+	return record
+}
+
+func stateGitHubArtifact(record githubsource.Record) state.GitHubArtifact {
+	artifact := state.GitHubArtifact{Repo: record.Repo, Ref: record.Ref, Archive: record.Archive, Sha256: record.Sha256, Files: make([]state.GitHubFile, 0, len(record.Files))}
+	for _, file := range record.Files {
+		artifact.Files = append(artifact.Files, state.GitHubFile{Source: file.Source, Target: file.Target, Digest: file.Digest})
+	}
+	return artifact
+}
+
+func sameGitHubArtifact(previous githubsource.Record, artifact githubsource.Artifact, spec githubsource.Spec) bool {
+	if previous.Repo != artifact.Repo || previous.Ref != artifact.Ref || previous.Archive != artifact.Archive || previous.Sha256 != artifact.Sha256 || len(previous.Files) != len(spec.Files) {
+		return false
+	}
+	for _, file := range spec.Files {
+		found := false
+		for _, previousFile := range previous.Files {
+			if previousFile.Source == file.Source && sameGitHubTarget(previousFile.Target, file.Target) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func sameGitHubTarget(previous, declared string) bool {
+	if previous == declared {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	declared = strings.Replace(declared, "$HOME", home, 1)
+	previous, previousErr := filepath.Abs(previous)
+	declared, declaredErr := filepath.Abs(declared)
+	return previousErr == nil && declaredErr == nil && previous == declared
 }
 
 func BuildAppImagePlan(ctx context.Context, m *manifest.Manifest, s *state.State, profile string, system appimage.System) (AppImagePlan, error) {
@@ -548,6 +699,8 @@ func splitByOrigin(m *manifest.Manifest, packages []string) ([]string, []string,
 		switch m.PackageOrigin(packageName) {
 		case "appimage":
 			continue
+		case "github":
+			continue
 		case "repo":
 			repository = append(repository, packageName)
 		case "aur":
@@ -588,6 +741,8 @@ func Validate(ctx context.Context, m *manifest.Manifest, profile string, extra [
 	for _, packageName := range packages {
 		switch m.PackageOrigin(packageName) {
 		case "appimage":
+			continue
+		case "github":
 			continue
 		case "repo":
 			validation.Repo = append(validation.Repo, packageName)

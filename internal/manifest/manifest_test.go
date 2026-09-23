@@ -272,6 +272,82 @@ common:
 	}
 }
 
+func TestGitHubPackageMetadataAndValidation(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "packages.yaml")
+	contents := []byte(`source: repo
+profiles:
+  server:
+    packages:
+      headless:
+        hunk:
+          source: github
+          repo: lukelex/hunk
+          ref: 0123456789abcdef0123456789abcdef01234567
+          archive: source
+          sha256: ` + strings.Repeat("a", 64) + `
+          files:
+            - source: bin/hunk-pager
+              target: $HOME/.local/bin/hunk-pager
+`)
+	if err := os.WriteFile(path, contents, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m, err := Load(path, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, ok := m.GitHub("hunk")
+	if !ok || spec.Repo != "lukelex/hunk" || len(spec.Files) != 1 || spec.Files[0].Target != "$HOME/.local/bin/hunk-pager" {
+		t.Fatalf("GitHub spec = %#v, found = %v", spec, ok)
+	}
+	if got := m.PackageOrigin("hunk"); got != "github" {
+		t.Fatalf("origin = %q", got)
+	}
+}
+
+func TestGitHubValidationRejectsFloatingUnsafeAndIncompleteMetadata(t *testing.T) {
+	for name, contents := range map[string]string{
+		"floating-ref": githubManifest(`ref: main
+sha256: ` + strings.Repeat("a", 64) + `
+`),
+		"unsafe-target": githubManifest(`ref: v1.2.3
+sha256: ` + strings.Repeat("a", 64) + `
+files:
+  - source: ../bin/hunk-pager
+    target: /usr/local/bin/hunk-pager
+`),
+		"missing-checksum": githubManifest(`ref: v1.2.3
+`),
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "packages.yaml")
+			if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path, ""); err == nil {
+				t.Fatal("manifest unexpectedly validated")
+			}
+		})
+	}
+}
+
+func githubManifest(overrides string) string {
+	overrides = strings.TrimSuffix(overrides, "\n")
+	overrides = strings.ReplaceAll(overrides, "\n", "\n        ")
+	return `source: repo
+common:
+  packages:
+    headless:
+      hunk:
+        source: github
+        repo: lukelex/hunk
+        archive: source
+        files:
+          - source: bin/hunk-pager
+            target: $HOME/.local/bin/hunk-pager
+` + "        " + overrides + "\n"
+}
+
 func contains(values []string, wanted string) bool {
 	for _, value := range values {
 		if value == wanted {

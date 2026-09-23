@@ -13,6 +13,7 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/appimage"
 	"github.com/lukelex/dotpkg/internal/backend"
+	githubsource "github.com/lukelex/dotpkg/internal/github"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/recovery"
 	"github.com/lukelex/dotpkg/internal/resource"
@@ -388,6 +389,81 @@ func TestRecoverRemovesPendingAppImage(t *testing.T) {
 	}
 }
 
+func TestSyncTracksAndCleansGitHubArtifacts(t *testing.T) {
+	directory := t.TempDir()
+	manifestPath := filepath.Join(directory, "packages.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`source: repo
+profiles:
+  server:
+    packages:
+      headless:
+        hunk:
+          source: github
+          repo: lukelex/hunk
+          ref: 0123456789abcdef0123456789abcdef01234567
+          archive: source
+          sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          files:
+            - source: bin/hunk-pager
+              target: $HOME/.local/bin/hunk-pager
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(directory, "state.yaml")
+	github := &fakeGitHub{}
+	options := Options{ManifestPath: manifestPath, StatePath: statePath, Profile: "server", Yes: true, GitHubSystem: github}
+	if err := Sync(context.Background(), options, &fakeBackend{installed: map[string]bool{}}); err != nil {
+		t.Fatal(err)
+	}
+	if github.installs != 1 {
+		t.Fatalf("GitHub installs = %d", github.installs)
+	}
+	loaded, err := state.Load(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := loaded.GitHubArtifacts()["hunk"]; !found {
+		t.Fatalf("GitHub state = %#v", loaded.GitHubArtifacts())
+	}
+	if err := os.WriteFile(manifestPath, []byte("source: repo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := Clean(context.Background(), options, &fakeBackend{installed: map[string]bool{}}); err != nil {
+		t.Fatal(err)
+	}
+	if github.removes != 1 {
+		t.Fatalf("GitHub removals = %d", github.removes)
+	}
+}
+
+func TestGitHubDryRunDoesNotInstall(t *testing.T) {
+	manifestPath := filepath.Join(t.TempDir(), "packages.yaml")
+	if err := os.WriteFile(manifestPath, []byte(`source: repo
+profiles:
+  server:
+    packages:
+      headless:
+        tool:
+          source: github
+          repo: acme/tool
+          ref: v1.0.0
+          archive: source
+          sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          files:
+            - source: bin/tool
+              target: $HOME/.local/bin/tool
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	github := &fakeGitHub{}
+	if err := Sync(context.Background(), Options{ManifestPath: manifestPath, StatePath: filepath.Join(t.TempDir(), "state.yaml"), Profile: "server", DryRun: true, GitHubSystem: github}, &fakeBackend{installed: map[string]bool{}}); err != nil {
+		t.Fatal(err)
+	}
+	if github.installs != 0 {
+		t.Fatalf("dry-run GitHub installs = %d", github.installs)
+	}
+}
+
 func TestEnsureSelectionsMatchesInteractivePromptsAndConsumesAnswers(t *testing.T) {
 	directory := t.TempDir()
 	manifestPath := filepath.Join(directory, "packages.yaml")
@@ -552,6 +628,43 @@ func (f *fakeAppImage) Remove(_ context.Context, record appimage.Record) error {
 }
 
 var _ appimage.System = (*fakeAppImage)(nil)
+
+type fakeGitHub struct {
+	installed map[string]bool
+	installs  int
+	removes   int
+}
+
+func (f *fakeGitHub) Resolve(_ context.Context, spec githubsource.Spec) (githubsource.Artifact, error) {
+	return githubsource.Artifact{Address: "https://example.invalid/" + spec.Name, Repo: spec.Repo, Ref: spec.Ref, Archive: spec.Archive, Sha256: spec.Sha256}, nil
+}
+
+func (f *fakeGitHub) Installed(_ context.Context, record githubsource.Record) (bool, error) {
+	return f.installed != nil && f.installed[record.Name], nil
+}
+
+func (f *fakeGitHub) Install(_ context.Context, spec githubsource.Spec, artifact githubsource.Artifact, _ *githubsource.Record) (githubsource.Record, error) {
+	if f.installed == nil {
+		f.installed = map[string]bool{}
+	}
+	f.installs++
+	f.installed[spec.Name] = true
+	record := githubsource.Record{Name: spec.Name, Repo: artifact.Repo, Ref: artifact.Ref, Archive: artifact.Archive, Sha256: artifact.Sha256}
+	for _, file := range spec.Files {
+		record.Files = append(record.Files, githubsource.InstalledFile{Source: file.Source, Target: file.Target, Digest: strings.Repeat("b", 64)})
+	}
+	return record, nil
+}
+
+func (f *fakeGitHub) Remove(_ context.Context, record githubsource.Record) error {
+	f.removes++
+	if f.installed != nil {
+		delete(f.installed, record.Name)
+	}
+	return nil
+}
+
+var _ githubsource.System = (*fakeGitHub)(nil)
 
 func testManifest(t *testing.T) string {
 	t.Helper()

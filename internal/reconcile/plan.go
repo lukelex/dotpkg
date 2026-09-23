@@ -64,6 +64,11 @@ func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Opti
 	return document
 }
 
+func appendGitHubPlan(document *PlanDocument, plan GitHubPlan) {
+	document.Stages = append(document.Stages, planStage("github", plan.Declared, plan.Adopted, plan.Missing, plan.Extra, "install"))
+	document.Changes += plan.Changes()
+}
+
 func planStage(name string, declared, adopted, missing, extra []string, missingAction string) PlanStage {
 	stage := PlanStage{
 		Name:     name,
@@ -119,6 +124,19 @@ func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resourc
 				fmt.Fprintf(output, "  - remove: %s\n", item)
 			}
 		}
+	}
+}
+
+func printPlanWithGitHub(output io.Writer, packagePlan Plan, format string, resourcePlan *resource.Plan, options Options, appImagePlan AppImagePlan, githubPlan GitHubPlan) {
+	if format == "json" {
+		document := NewPlanDocument(packagePlan, resourcePlan, options, appImagePlan)
+		appendGitHubPlan(&document, githubPlan)
+		_ = json.NewEncoder(output).Encode(document)
+		return
+	}
+	printPlan(output, packagePlan, format, resourcePlan, options, appImagePlan)
+	if githubPlan.Changes() > 0 {
+		printPackagePlan(output, "GITHUB", githubPlan.Plan, "install")
 	}
 }
 

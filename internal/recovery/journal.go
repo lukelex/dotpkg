@@ -31,15 +31,36 @@ type AppImages struct {
 	Removed   []AppImage `yaml:"removed,omitempty" json:"removed,omitempty"`
 }
 
+type GitHubFile struct {
+	Source string `yaml:"source" json:"source"`
+	Target string `yaml:"target" json:"target"`
+	Digest string `yaml:"digest" json:"digest"`
+}
+
+type GitHubArtifact struct {
+	Name    string       `yaml:"name" json:"name"`
+	Repo    string       `yaml:"repo" json:"repo"`
+	Ref     string       `yaml:"ref" json:"ref"`
+	Archive string       `yaml:"archive" json:"archive"`
+	Sha256  string       `yaml:"sha256" json:"sha256"`
+	Files   []GitHubFile `yaml:"files" json:"files"`
+}
+
+type GitHubArtifacts struct {
+	Installed []GitHubArtifact `yaml:"installed,omitempty" json:"installed,omitempty"`
+	Removed   []GitHubArtifact `yaml:"removed,omitempty" json:"removed,omitempty"`
+}
+
 type Journal struct {
-	Version   int       `yaml:"version" json:"version"`
-	StartedAt string    `yaml:"started_at" json:"started_at"`
-	StatePath string    `yaml:"state_path" json:"state_path"`
-	Profile   string    `yaml:"profile" json:"profile"`
-	Completed bool      `yaml:"completed,omitempty" json:"completed,omitempty"`
-	Installed Packages  `yaml:"installed" json:"installed"`
-	Removed   Packages  `yaml:"removed" json:"removed"`
-	AppImages AppImages `yaml:"appimages,omitempty" json:"appimages,omitempty"`
+	Version   int             `yaml:"version" json:"version"`
+	StartedAt string          `yaml:"started_at" json:"started_at"`
+	StatePath string          `yaml:"state_path" json:"state_path"`
+	Profile   string          `yaml:"profile" json:"profile"`
+	Completed bool            `yaml:"completed,omitempty" json:"completed,omitempty"`
+	Installed Packages        `yaml:"installed" json:"installed"`
+	Removed   Packages        `yaml:"removed" json:"removed"`
+	AppImages AppImages       `yaml:"appimages,omitempty" json:"appimages,omitempty"`
+	GitHub    GitHubArtifacts `yaml:"github,omitempty" json:"github,omitempty"`
 }
 
 func Path(statePath string) string { return statePath + ".journal.yaml" }

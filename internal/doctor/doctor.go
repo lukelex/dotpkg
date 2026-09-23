@@ -8,6 +8,7 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/appimage"
 	"github.com/lukelex/dotpkg/internal/backend"
+	githubsource "github.com/lukelex/dotpkg/internal/github"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/reconcile"
 	"github.com/lukelex/dotpkg/internal/resource"
@@ -64,6 +65,21 @@ func Run(ctx context.Context, m *manifest.Manifest, s *state.State, options reco
 		}
 		for _, name := range appImagePlan.Extra {
 			report.add("warning", "appimages", fmt.Sprintf("managed AppImage is no longer declared: %s", name))
+		}
+	}
+	githubSystem := options.GitHubSystem
+	if githubSystem == nil {
+		githubSystem = githubsource.New()
+	}
+	githubPlan, err := reconcile.BuildGitHubPlan(ctx, m, s, options.Profile, githubSystem)
+	if err != nil {
+		report.add("error", "github", err.Error())
+	} else {
+		for _, name := range githubPlan.Missing {
+			report.add("error", "github", fmt.Sprintf("declared GitHub artifact is missing or stale: %s", name))
+		}
+		for _, name := range githubPlan.Extra {
+			report.add("warning", "github", fmt.Sprintf("managed GitHub artifact is no longer declared: %s", name))
 		}
 	}
 

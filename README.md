@@ -94,7 +94,7 @@ Releases provide libc-independent static binaries for `linux/amd64` and
 `linux/arm64`. Download a pinned release and verify it before installing:
 
 ```sh
-version=v0.13.0
+version=v0.14.0
 curl --fail --location --remote-name \
   "https://github.com/lukelex/dotpkg/releases/download/${version}/dotpkg-linux-amd64"
 curl --fail --location --remote-name \
@@ -138,12 +138,37 @@ profiles:
           i3:
 ```
 
-Package metadata can declare `source: repo|aur|appimage`, group membership, config
+Package metadata can declare `source: repo|aur|appimage|github`, group membership, config
 links, and services. AppImage nodes use `source: appimage` with an HTTPS
 `address`; their integrity metadata is resolved automatically. A host file supplied with `--host PATH` is deep-merged
 over the manifest. Use `--manifest PATH` or `DOTPKG_MANIFEST=PATH` to select
 the manifest; resource paths resolve relative to its directory unless
 `--root PATH` is supplied.
+
+GitHub artifacts install only explicitly mapped regular files from a pinned
+source archive or release asset. They require a SHA-256 checksum, never run
+repository build scripts, and can target only paths below `$HOME`:
+
+```yaml
+hunk:
+  source: github
+  repo: lukelex/hunk
+  ref: 0123456789abcdef0123456789abcdef01234567
+  archive: source
+  sha256: <64-character-sha256>
+  files:
+    - source: bin/hunk-pager
+      target: $HOME/.local/bin/hunk-pager
+    - source: bin/git-hunk
+      target: $HOME/.local/bin/git-hunk
+```
+
+`archive: source` downloads `https://github.com/<repo>/archive/<ref>.tar.gz`.
+Any other `archive` value is treated as a release-asset file name for the
+pinned ref. Floating refs such as `main` and `latest`, archive path traversal,
+symlinks, unsafe targets, and checksum mismatches are rejected. Installed files
+and their content digests are tracked in state; `sync`, `clean`, and `recover`
+remove only unmodified files owned by dotpkg.
 
 ## CLI and automation
 

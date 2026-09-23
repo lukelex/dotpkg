@@ -165,7 +165,7 @@ func validatePackageSection(value any, path string) error {
 }
 
 func isMetadataMapping(value map[string]any) bool {
-	for _, key := range []string{"source", "address", "target", "groups", "configs", "services", "install"} {
+	for _, key := range []string{"source", "address", "target", "repo", "ref", "archive", "files", "groups", "configs", "services", "install"} {
 		if _, ok := value[key]; ok {
 			return true
 		}
@@ -202,7 +202,7 @@ func validatePackageValue(value any, path string) error {
 			if err := validateSource(child, fieldPath); err != nil {
 				return err
 			}
-		case "address", "target":
+		case "address", "target", "repo", "ref", "archive":
 			if text, ok := child.(string); !ok || strings.TrimSpace(text) == "" {
 				return fmt.Errorf("%s must be a non-empty string", fieldPath)
 			}
@@ -226,6 +226,10 @@ func validatePackageValue(value any, path string) error {
 			if err := validateSha256(child, fieldPath); err != nil {
 				return err
 			}
+		case "files":
+			if err := validateGitHubFiles(child, fieldPath); err != nil {
+				return err
+			}
 		}
 	}
 	if source == "appimage" {
@@ -243,7 +247,130 @@ func validatePackageValue(value any, path string) error {
 			}
 		}
 	}
+	if source == "github" {
+		if err := validateGitHubPackage(mapping, path); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func validateGitHubPackage(mapping map[string]any, path string) error {
+	repo, _ := mapping["repo"].(string)
+	parts := strings.Split(repo, "/")
+	if len(parts) != 2 || !githubName(parts[0]) || !githubName(parts[1]) {
+		return fmt.Errorf("%s.repo must be an owner/repository name", path)
+	}
+	ref, _ := mapping["ref"].(string)
+	if floatingGitHubRef(ref) || !githubRef(ref) {
+		return fmt.Errorf("%s.ref must be a pinned tag or commit, not %q", path, ref)
+	}
+	if _, ok := mapping["archive"].(string); !ok {
+		return fmt.Errorf("%s.archive is required for GitHub packages", path)
+	}
+	archive := mapping["archive"].(string)
+	if archive != "source" && (!safeArchivePath(archive) || strings.Contains(archive, "/")) {
+		return fmt.Errorf("%s.archive must be source or a release asset file name", path)
+	}
+	if _, ok := mapping["sha256"]; !ok {
+		return fmt.Errorf("%s.sha256 is required for GitHub packages", path)
+	}
+	files, ok := mapping["files"].([]any)
+	if !ok || len(files) == 0 {
+		return fmt.Errorf("%s.files must be a non-empty list", path)
+	}
+	return nil
+}
+
+func githubRef(value string) bool {
+	for _, character := range value {
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+func githubName(value string) bool {
+	if value == "" || strings.HasPrefix(value, ".") || strings.HasSuffix(value, ".") {
+		return false
+	}
+	for _, character := range value {
+		if !((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') || character == '-' || character == '_' || character == '.') {
+			return false
+		}
+	}
+	return true
+}
+
+func floatingGitHubRef(ref string) bool {
+	ref = strings.TrimSpace(ref)
+	if ref == "" || strings.Contains(ref, "/") || strings.Contains(ref, "\\") || strings.Contains(ref, "..") {
+		return true
+	}
+	switch strings.ToLower(ref) {
+	case "main", "master", "head", "latest", "stable", "development", "develop":
+		return true
+	}
+	return false
+}
+
+func validateGitHubFiles(value any, path string) error {
+	items, ok := value.([]any)
+	if !ok || len(items) == 0 {
+		return fmt.Errorf("%s must be a non-empty list", path)
+	}
+	targets := make(map[string]struct{}, len(items))
+	for index, item := range items {
+		itemPath := fmt.Sprintf("%s[%d]", path, index)
+		mapping, ok := item.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s must be a mapping", itemPath)
+		}
+		for _, field := range []string{"source", "target"} {
+			text, ok := mapping[field].(string)
+			if !ok || strings.TrimSpace(text) == "" {
+				return fmt.Errorf("%s.%s must be a non-empty string", itemPath, field)
+			}
+			if field == "source" && !safeArchivePath(text) {
+				return fmt.Errorf("%s.source must be a relative path without traversal", itemPath)
+			}
+		}
+		target := mapping["target"].(string)
+		if !safeGitHubTarget(target) {
+			return fmt.Errorf("%s.target must be a safe path inside $HOME", itemPath)
+		}
+		if _, duplicate := targets[target]; duplicate {
+			return fmt.Errorf("%s.target is duplicated: %s", itemPath, target)
+		}
+		targets[target] = struct{}{}
+	}
+	return nil
+}
+
+func safeGitHubTarget(value string) bool {
+	if !strings.HasPrefix(value, "$HOME/") {
+		return false
+	}
+	for _, part := range strings.Split(strings.TrimPrefix(value, "$HOME/"), "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
+func safeArchivePath(value string) bool {
+	value = strings.ReplaceAll(value, "\\", "/")
+	if value == "" || strings.HasPrefix(value, "/") {
+		return false
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func validateOptions(value any, path string) error {
@@ -490,8 +617,8 @@ func validateStringList(value any, path string) error {
 
 func validateSource(value any, path string) error {
 	source, ok := value.(string)
-	if !ok || (source != "repo" && source != "aur" && source != "appimage") {
-		return fmt.Errorf("%s must be repo, aur, or appimage", path)
+	if !ok || (source != "repo" && source != "aur" && source != "appimage" && source != "github") {
+		return fmt.Errorf("%s must be repo, aur, appimage, or github", path)
 	}
 	return nil
 }
@@ -516,6 +643,83 @@ type AppImageSpec struct {
 	Address string
 	Target  string
 	Sha256  string
+}
+
+// GitHubFile maps one regular file in a GitHub archive to a user-owned target.
+type GitHubFile struct {
+	Source string
+	Target string
+}
+
+// GitHubSpec describes a pinned GitHub archive or release asset.
+type GitHubSpec struct {
+	Name    string
+	Repo    string
+	Ref     string
+	Archive string
+	Sha256  string
+	Files   []GitHubFile
+}
+
+func (m *Manifest) GitHub(name string) (GitHubSpec, bool) {
+	var result GitHubSpec
+	found := false
+	var walk func(any)
+	walk = func(value any) {
+		if found {
+			return
+		}
+		mapping, ok := value.(map[string]any)
+		if !ok {
+			return
+		}
+		if packageValue, exists := mapping[name]; exists {
+			if metadata, ok := packageValue.(map[string]any); ok {
+				if source, _ := metadata["source"].(string); source == "github" {
+					result = GitHubSpec{Name: name}
+					result.Repo, _ = metadata["repo"].(string)
+					result.Ref, _ = metadata["ref"].(string)
+					result.Archive, _ = metadata["archive"].(string)
+					result.Sha256, _ = metadata["sha256"].(string)
+					for _, item := range metadata["files"].([]any) {
+						file, ok := item.(map[string]any)
+						if !ok {
+							continue
+						}
+						source, sourceOK := file["source"].(string)
+						target, targetOK := file["target"].(string)
+						if sourceOK && targetOK {
+							result.Files = append(result.Files, GitHubFile{Source: source, Target: target})
+						}
+					}
+					found = true
+				}
+			}
+		}
+		for _, child := range mapping {
+			walk(child)
+		}
+	}
+	walk(m.Data)
+	return result, found
+}
+
+func (m *Manifest) GitHubs(paths []string) []GitHubSpec {
+	var result []GitHubSpec
+	seen := make(map[string]struct{})
+	for _, path := range paths {
+		for _, name := range m.PackageNames(path) {
+			if _, already := seen[name]; already {
+				continue
+			}
+			if spec, ok := m.GitHub(name); ok {
+				result = append(result, spec)
+				seen[name] = struct{}{}
+			}
+		}
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
+	return result
 }
 
 // AppImage returns the AppImage metadata attached to a package node.

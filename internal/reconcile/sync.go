@@ -9,6 +9,7 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/appimage"
 	"github.com/lukelex/dotpkg/internal/backend"
+	githubsource "github.com/lukelex/dotpkg/internal/github"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/recovery"
 	"github.com/lukelex/dotpkg/internal/resource"
@@ -50,7 +51,11 @@ func Recover(ctx context.Context, options Options, system backend.Backend) error
 	if err != nil {
 		return err
 	}
-	if err := rollback(ctx, system, appSystem, journal); err != nil {
+	githubSystem, err := githubBackend(normalized)
+	if err != nil {
+		return err
+	}
+	if err := rollback(ctx, system, appSystem, githubSystem, journal); err != nil {
 		return fmt.Errorf("recovery failed; journal retained: %w", err)
 	}
 	return recovery.Clear(normalized.StatePath)
@@ -91,6 +96,14 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	if err != nil {
 		return err
 	}
+	githubSystem, err := githubBackend(options)
+	if err != nil {
+		return err
+	}
+	githubPlan, err := BuildGitHubPlan(ctx, m, s, options.Profile, githubSystem)
+	if err != nil {
+		return err
+	}
 	var resourcePlan *resource.Plan
 	if options.Resources && options.OutputFormat == "json" {
 		resourceSystem, resourceErr := resourceBackend(options, system)
@@ -107,10 +120,10 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		}
 		resourcePlan = &planned
 	}
-	printPlan(options.Output, plan, options.OutputFormat, resourcePlan, options, appImagePlan)
-	if plan.Changes() == 0 && appImagePlan.Changes() == 0 {
+	printPlanWithGitHub(options.Output, plan, options.OutputFormat, resourcePlan, options, appImagePlan, githubPlan)
+	if plan.Changes() == 0 && appImagePlan.Changes() == 0 && githubPlan.Changes() == 0 {
 		if options.OutputFormat == "text" {
-			fmt.Fprintln(options.Output, "packages and AppImages: already synchronized")
+			fmt.Fprintln(options.Output, "packages, AppImages, and GitHub artifacts: already synchronized")
 		}
 		if !options.Resources {
 			return nil
@@ -121,7 +134,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	}
 	apply := options.Yes
 	if !options.Yes {
-		apply, err = askSelection(options, "Apply package and AppImage changes? [y/N] ", false)
+		apply, err = askSelection(options, "Apply package, AppImage, and GitHub artifact changes? [y/N] ", false)
 		if err != nil {
 			return err
 		}
@@ -152,32 +165,66 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	for _, name := range appImagePlan.Extra {
 		journal.AppImages.Removed = append(journal.AppImages.Removed, recoveryAppImageRecord(appImagePlan.Previous[name]))
 	}
+	for _, name := range githubPlan.Extra {
+		journal.GitHub.Removed = append(journal.GitHub.Removed, recoveryGitHubRecord(githubPlan.Previous[name]))
+	}
 	packageChanges := len(plan.Missing) + len(plan.Extra)
 	appImageChanges := appImagePlan.Changes()
-	if packageChanges > 0 || appImageChanges > 0 {
+	githubChanges := githubPlan.Changes()
+	if packageChanges > 0 || appImageChanges > 0 || githubChanges > 0 {
 		if err := journal.Write(); err != nil {
 			return err
 		}
 	}
 	if err := system.Install(ctx, repository, aur, options.Profile); err != nil {
-		return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+		return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 	}
 	if err := system.Remove(ctx, plan.Extra, options.Profile); err != nil {
-		return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+		return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 	}
 	for _, name := range appImagePlan.Missing {
 		if _, err := appSystem.Install(ctx, appImagePlan.Specs[name], appImagePlan.Artifacts[name]); err != nil {
-			return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+			return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
 		if previous, ok := appImagePlan.Previous[name]; ok && previous.Target != appImagePlan.Records[name].Target {
 			if err := appSystem.Remove(ctx, previous); err != nil {
-				return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+				return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 			}
 		}
 	}
 	for _, name := range appImagePlan.Extra {
 		if err := appSystem.Remove(ctx, appImagePlan.Previous[name]); err != nil {
-			return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+			return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
+		}
+	}
+	for _, name := range githubPlan.Missing {
+		var previous *githubsource.Record
+		if record, ok := githubPlan.Previous[name]; ok {
+			copy := record
+			previous = &copy
+			journal.GitHub.Removed = append(journal.GitHub.Removed, recoveryGitHubRecord(record))
+		}
+		record, installErr := githubSystem.Install(ctx, githubPlan.Specs[name], githubPlan.Artifacts[name], previous)
+		if installErr != nil {
+			return packageFailure(installErr, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
+		}
+		githubPlan.Records[name] = record
+		journal.GitHub.Installed = append(journal.GitHub.Installed, recoveryGitHubRecord(record))
+		if err := journal.Write(); err != nil {
+			return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
+		}
+		if previous != nil {
+			stale := staleGitHubFiles(*previous, record)
+			if len(stale.Files) > 0 {
+				if err := githubSystem.Remove(ctx, stale); err != nil {
+					return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
+				}
+			}
+		}
+	}
+	for _, name := range githubPlan.Extra {
+		if err := githubSystem.Remove(ctx, githubPlan.Previous[name]); err != nil {
+			return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
 	}
 	tracked := append([]string{}, s.Packages()...)
@@ -209,17 +256,25 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		}
 	}
 	s.SetAppImages(images)
+	artifacts := s.GitHubArtifacts()
+	for _, name := range githubPlan.Extra {
+		delete(artifacts, name)
+	}
+	for _, name := range append(append([]string{}, githubPlan.Adopted...), githubPlan.Missing...) {
+		artifacts[name] = stateGitHubArtifact(githubPlan.Records[name])
+	}
+	s.SetGitHubArtifacts(artifacts)
 	setCurrentState(s, m, options)
 	if err := s.Write(); err != nil {
-		return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+		return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 	}
 	if err := syncResources(ctx, m, s, options, system); err != nil {
-		if packageChanges > 0 || appImageChanges > 0 {
-			return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
+		if packageChanges > 0 || appImageChanges > 0 || githubChanges > 0 {
+			return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
 		return err
 	}
-	if packageChanges > 0 || appImageChanges > 0 {
+	if packageChanges > 0 || appImageChanges > 0 || githubChanges > 0 {
 		journal.Completed = true
 		if err := journal.Write(); err != nil {
 			return fmt.Errorf("complete recovery journal: %w", err)
@@ -268,6 +323,22 @@ func appImageRecordFromRecovery(record recovery.AppImage) appimage.Record {
 	}
 }
 
+func recoveryGitHubRecord(record githubsource.Record) recovery.GitHubArtifact {
+	result := recovery.GitHubArtifact{Name: record.Name, Repo: record.Repo, Ref: record.Ref, Archive: record.Archive, Sha256: record.Sha256, Files: make([]recovery.GitHubFile, 0, len(record.Files))}
+	for _, file := range record.Files {
+		result.Files = append(result.Files, recovery.GitHubFile{Source: file.Source, Target: file.Target, Digest: file.Digest})
+	}
+	return result
+}
+
+func githubRecordFromRecovery(record recovery.GitHubArtifact) githubsource.Record {
+	result := githubsource.Record{Name: record.Name, Repo: record.Repo, Ref: record.Ref, Archive: record.Archive, Sha256: record.Sha256, Files: make([]githubsource.InstalledFile, 0, len(record.Files))}
+	for _, file := range record.Files {
+		result.Files = append(result.Files, githubsource.InstalledFile{Source: file.Source, Target: file.Target, Digest: file.Digest})
+	}
+	return result
+}
+
 func packageGroupFromState(packages []string, origins map[string]string, m *manifest.Manifest) recovery.Packages {
 	var repository, aur, unknown []string
 	for _, packageName := range packages {
@@ -287,8 +358,8 @@ func packageGroupFromState(packages []string, origins map[string]string, m *mani
 	return packageGroup(repository, aur, unknown)
 }
 
-func packageFailure(original error, ctx context.Context, system backend.Backend, appSystem appimage.System, journal recovery.Journal, s *state.State, oldState map[string]any, oldPackages []string, oldOrigins map[string]string) error {
-	rollbackErr := rollback(ctx, system, appSystem, journal)
+func packageFailure(original error, ctx context.Context, system backend.Backend, appSystem appimage.System, githubSystem githubsource.System, journal recovery.Journal, s *state.State, oldState map[string]any, oldPackages []string, oldOrigins map[string]string) error {
+	rollbackErr := rollback(ctx, system, appSystem, githubSystem, journal)
 	s.Restore(oldState)
 	s.SetPackages(oldPackages)
 	s.SetPackageOrigins(oldOrigins)
@@ -302,7 +373,7 @@ func packageFailure(original error, ctx context.Context, system backend.Backend,
 	return original
 }
 
-func rollback(ctx context.Context, system backend.Backend, appSystem appimage.System, journal recovery.Journal) error {
+func rollback(ctx context.Context, system backend.Backend, appSystem appimage.System, githubSystem githubsource.System, journal recovery.Journal) error {
 	var errorsFound []string
 	var installed []string
 	for _, packageName := range append(append([]string{}, journal.Installed.Repository...), journal.Installed.AUR...) {
@@ -349,6 +420,32 @@ func rollback(ctx context.Context, system backend.Backend, appSystem appimage.Sy
 			}
 		}
 	}
+	if githubSystem != nil {
+		for _, record := range journal.GitHub.Installed {
+			githubRecord := githubRecordFromRecovery(record)
+			present, err := githubSystem.Installed(ctx, githubRecord)
+			if err == nil && present {
+				err = githubSystem.Remove(ctx, githubRecord)
+			}
+			if err != nil {
+				errorsFound = append(errorsFound, fmt.Sprintf("remove newly installed GitHub artifact %s: %v", record.Name, err))
+			}
+		}
+		for _, record := range journal.GitHub.Removed {
+			githubRecord := githubRecordFromRecovery(record)
+			spec := githubsource.Spec{Name: githubRecord.Name, Repo: githubRecord.Repo, Ref: githubRecord.Ref, Archive: githubRecord.Archive, Sha256: githubRecord.Sha256}
+			for _, file := range githubRecord.Files {
+				spec.Files = append(spec.Files, githubsource.File{Source: file.Source, Target: file.Target})
+			}
+			artifact, resolveErr := githubSystem.Resolve(ctx, spec)
+			if resolveErr == nil {
+				_, resolveErr = githubSystem.Install(ctx, spec, artifact, &githubRecord)
+			}
+			if resolveErr != nil {
+				errorsFound = append(errorsFound, fmt.Sprintf("restore GitHub artifact %s: %v", record.Name, resolveErr))
+			}
+		}
+	}
 	if len(errorsFound) > 0 {
 		return errors.New(strings.Join(errorsFound, "; "))
 	}
@@ -360,6 +457,28 @@ func appImageBackend(options Options) (appimage.System, error) {
 		return options.AppImageSystem, nil
 	}
 	return appimage.New(), nil
+}
+
+func githubBackend(options Options) (githubsource.System, error) {
+	if options.GitHubSystem != nil {
+		return options.GitHubSystem, nil
+	}
+	return githubsource.New(), nil
+}
+
+func staleGitHubFiles(previous, current githubsource.Record) githubsource.Record {
+	currentTargets := make(map[string]struct{}, len(current.Files))
+	for _, file := range current.Files {
+		currentTargets[file.Target] = struct{}{}
+	}
+	stale := previous
+	stale.Files = stale.Files[:0]
+	for _, file := range previous.Files {
+		if _, retained := currentTargets[file.Target]; !retained {
+			stale.Files = append(stale.Files, file)
+		}
+	}
+	return stale
 }
 
 func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system backend.Backend) error {

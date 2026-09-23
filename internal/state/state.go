@@ -25,6 +25,20 @@ type AppImage struct {
 	Version   string
 }
 
+type GitHubFile struct {
+	Source string
+	Target string
+	Digest string
+}
+
+type GitHubArtifact struct {
+	Repo    string
+	Ref     string
+	Archive string
+	Sha256  string
+	Files   []GitHubFile
+}
+
 const (
 	CurrentVersion = 1
 
@@ -32,6 +46,7 @@ const (
 	ManagedPackages        = "packages"
 	ManagedPackageOrigins  = "package_origins"
 	ManagedAppImages       = "appimages"
+	ManagedGitHubArtifacts = "github"
 	ManagedGroups          = "groups"
 	ManagedConfigs         = "configs"
 	ManagedServices        = "services"
@@ -132,6 +147,10 @@ func migrate(data map[string]any) (bool, error) {
 		managed[ManagedAppImages] = map[string]any{}
 		migrated = true
 	}
+	if _, ok := managed[ManagedGitHubArtifacts]; !ok {
+		managed[ManagedGitHubArtifacts] = map[string]any{}
+		migrated = true
+	}
 	data["version"] = CurrentVersion
 	return migrated, nil
 }
@@ -213,6 +232,41 @@ func validate(data map[string]any) error {
 			}
 		}
 	}
+	if artifacts, exists := managedMap[ManagedGitHubArtifacts]; exists {
+		artifactMap, ok := artifacts.(map[string]any)
+		if !ok {
+			return fmt.Errorf("managed.github must be a mapping")
+		}
+		for name, value := range artifactMap {
+			if name == "" {
+				return fmt.Errorf("managed.github contains an empty name")
+			}
+			mapping, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("managed.github.%s must be a mapping", name)
+			}
+			for _, field := range []string{"repo", "ref", "archive", "sha256"} {
+				if text, ok := mapping[field].(string); !ok || text == "" {
+					return fmt.Errorf("managed.github.%s.%s must be a non-empty string", name, field)
+				}
+			}
+			files, ok := mapping["files"].([]any)
+			if !ok || len(files) == 0 {
+				return fmt.Errorf("managed.github.%s.files must be a non-empty list", name)
+			}
+			for index, file := range files {
+				fields, ok := file.(map[string]any)
+				if !ok {
+					return fmt.Errorf("managed.github.%s.files[%d] must be a mapping", name, index)
+				}
+				for _, field := range []string{"source", "target", "digest"} {
+					if text, ok := fields[field].(string); !ok || text == "" {
+						return fmt.Errorf("managed.github.%s.files[%d].%s must be a non-empty string", name, index, field)
+					}
+				}
+			}
+		}
+	}
 	return nil
 }
 
@@ -237,6 +291,7 @@ func defaultData() map[string]any {
 			ManagedPackages:        []any{},
 			ManagedPackageOrigins:  map[string]any{},
 			ManagedAppImages:       map[string]any{},
+			ManagedGitHubArtifacts: map[string]any{},
 			ManagedGroups:          []any{},
 			ManagedConfigs:         []any{},
 			ManagedServices:        []any{},
@@ -363,6 +418,68 @@ func (s *State) SetAppImages(images map[string]AppImage) {
 		values[name] = value
 	}
 	s.Set(values, ManagedKey, ManagedAppImages)
+}
+
+func (s *State) GitHubArtifacts() map[string]GitHubArtifact {
+	value, ok := s.Get(ManagedKey, ManagedGitHubArtifacts)
+	if !ok {
+		return map[string]GitHubArtifact{}
+	}
+	mapping, ok := value.(map[string]any)
+	if !ok {
+		return map[string]GitHubArtifact{}
+	}
+	result := make(map[string]GitHubArtifact, len(mapping))
+	for name, value := range mapping {
+		fields, ok := value.(map[string]any)
+		if !ok {
+			continue
+		}
+		artifact := GitHubArtifact{}
+		artifact.Repo, _ = fields["repo"].(string)
+		artifact.Ref, _ = fields["ref"].(string)
+		artifact.Archive, _ = fields["archive"].(string)
+		artifact.Sha256, _ = fields["sha256"].(string)
+		for _, item := range items(fields["files"]) {
+			file, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			source, sourceOK := file["source"].(string)
+			target, targetOK := file["target"].(string)
+			digest, digestOK := file["digest"].(string)
+			if sourceOK && targetOK && digestOK {
+				artifact.Files = append(artifact.Files, GitHubFile{Source: source, Target: target, Digest: digest})
+			}
+		}
+		result[name] = artifact
+	}
+	return result
+}
+
+func (s *State) SetGitHubArtifacts(artifacts map[string]GitHubArtifact) {
+	values := make(map[string]any, len(artifacts))
+	for name, artifact := range artifacts {
+		if name == "" || artifact.Repo == "" || artifact.Ref == "" || artifact.Archive == "" || artifact.Sha256 == "" || len(artifact.Files) == 0 {
+			continue
+		}
+		files := make([]any, 0, len(artifact.Files))
+		for _, file := range artifact.Files {
+			if file.Source == "" || file.Target == "" || file.Digest == "" {
+				continue
+			}
+			files = append(files, map[string]any{"source": file.Source, "target": file.Target, "digest": file.Digest})
+		}
+		if len(files) > 0 {
+			values[name] = map[string]any{"repo": artifact.Repo, "ref": artifact.Ref, "archive": artifact.Archive, "sha256": artifact.Sha256, "files": files}
+		}
+	}
+	s.Set(values, ManagedKey, ManagedGitHubArtifacts)
+}
+
+func items(value any) []any {
+	items, _ := value.([]any)
+	return items
 }
 
 func (s *State) Items(path ...string) []string {
