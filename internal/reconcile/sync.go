@@ -115,6 +115,16 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		bundlePlan = &planned
 	}
 	var resourcePlan *resource.Plan
+	if options.Resources {
+		resourceSystem, e := resourceBackend(options, system)
+		if e != nil {
+			return e
+		}
+		options.serviceTracker, e = resource.PrepareServices(ctx, m, s, resource.Options{Profile: options.Profile, RootPath: options.RootPath}, resourceSystem)
+		if e != nil {
+			return e
+		}
+	}
 	if options.Resources && options.OutputFormat == "json" {
 		resourceSystem, resourceErr := resourceBackend(options, system)
 		if resourceErr != nil {
@@ -129,6 +139,10 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 			return resourceErr
 		}
 		resourcePlan = &planned
+		resourcePlan.ServiceActions, resourceErr = options.serviceTracker.Actions(s)
+		if resourceErr != nil {
+			return resourceErr
+		}
 	}
 	printPlanWithGitHub(options.Output, plan, options.OutputFormat, resourcePlan, options, appImagePlan, githubPlan, bundlePlan)
 	if plan.Changes() == 0 && appImagePlan.Changes() == 0 && githubPlan.Changes() == 0 {
@@ -274,11 +288,16 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		artifacts[name] = stateGitHubArtifact(githubPlan.Records[name])
 	}
 	s.SetGitHubArtifacts(artifacts)
+	if options.serviceTracker != nil {
+		options.serviceTracker.PackageChanges(append(append([]string{}, plan.Missing...), plan.Extra...))
+	}
 	setCurrentState(s, m, options)
 	if err := s.Write(); err != nil {
 		return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 	}
-	if err := syncResources(ctx, m, s, options, system, bundlePlan); err != nil {
+	resourceErr := syncResources(ctx, m, s, options, system, bundlePlan)
+	var actionErr *resource.ServiceActionError
+	if err := resourceErr; err != nil && !errors.As(err, &actionErr) {
 		if packageChanges > 0 || appImageChanges > 0 || githubChanges > 0 {
 			return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
@@ -293,7 +312,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 			return err
 		}
 	}
-	return nil
+	return resourceErr
 }
 
 func packageGroup(repository, aur, unknown []string) recovery.Packages {
@@ -505,24 +524,42 @@ func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, op
 			return err
 		}
 	}
-	if err := resource.Sync(ctx, m, s, resource.Options{
-		Profile:         options.Profile,
-		RootPath:        options.RootPath,
-		DryRun:          options.DryRun,
-		Yes:             options.Yes,
-		Replace:         options.Replace,
-		RestartServices: options.RestartServices,
-		Input:           options.Input,
-		Output:          options.Output,
-		OutputFormat:    options.OutputFormat,
-		SuppressPlan:    options.OutputFormat == "json",
-	}, resourceSystem); err != nil {
+	resourceOptions := resource.Options{
+		Profile:             options.Profile,
+		RootPath:            options.RootPath,
+		DryRun:              options.DryRun,
+		Yes:                 options.Yes,
+		Replace:             options.Replace,
+		RestartServices:     options.RestartServices,
+		Input:               options.Input,
+		Output:              options.Output,
+		OutputFormat:        options.OutputFormat,
+		SuppressPlan:        options.OutputFormat == "json",
+		ServiceTracker:      options.serviceTracker,
+		DeferServiceActions: true,
+		NonInteractive:      options.NonInteractive,
+	}
+	if options.serviceTracker == nil {
+		options.serviceTracker, err = resource.PrepareServices(ctx, m, s, resourceOptions, resourceSystem)
+		if err != nil {
+			return err
+		}
+		resourceOptions.ServiceTracker = options.serviceTracker
+	}
+	if !options.DryRun {
+		if err := options.serviceTracker.Checkpoint(s); err != nil {
+			return err
+		}
+	}
+	if err := resource.Sync(ctx, m, s, resourceOptions, resourceSystem); err != nil {
 		return err
 	}
 	if len(bundlePlans) > 0 {
-		return applyRemoteBundles(ctx, s, options, bundlePlans[0])
+		if err := applyRemoteBundles(ctx, s, options, bundlePlans[0]); err != nil {
+			return err
+		}
 	}
-	return nil
+	return options.serviceTracker.Finish(ctx, s, resourceOptions, resourceSystem)
 }
 
 func resourceBackend(options Options, system backend.Backend) (resource.System, error) {

@@ -11,8 +11,9 @@ import (
 )
 
 type PlanChange struct {
-	Action string `json:"action"`
-	Item   string `json:"item"`
+	Action  string   `json:"action"`
+	Item    string   `json:"item"`
+	Reasons []string `json:"reasons,omitempty"`
 }
 
 type PlanStage struct {
@@ -58,6 +59,13 @@ func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Opti
 			if stage.IncludeEmpty || stage.Plan.Changes() > 0 || len(stage.Plan.Declared) > 0 {
 				document.Stages = append(document.Stages, resourceStage(stage.Name, stage.Plan))
 			}
+		}
+		if len(resourcePlan.ServiceActions) > 0 {
+			stage := planStage("service_actions", nil, nil, nil, nil, "")
+			for _, a := range resourcePlan.ServiceActions {
+				stage.Changes = append(stage.Changes, PlanChange{Action: a.Action, Item: a.Service, Reasons: a.Reasons})
+			}
+			document.Stages = append(document.Stages, stage)
 		}
 	}
 	for _, stage := range document.Stages {

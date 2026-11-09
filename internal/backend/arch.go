@@ -333,6 +333,15 @@ func (a *Arch) RestartService(ctx context.Context, user bool, service string) er
 	return nil
 }
 
+func (a *Arch) ServiceActive(ctx context.Context, user bool, service string) (bool, error) {
+	n := nativeResources{Runner: a.Runner}
+	return n.ServiceActive(ctx, user, service)
+}
+
+func (a *Arch) ReloadService(ctx context.Context, user bool, service string) error {
+	return a.runSystemctl(ctx, user, "reload", service)
+}
+
 func (a *Arch) runSystemctl(ctx context.Context, user bool, args ...string) error {
 	args = serviceArgs(user, args...)
 	if user {

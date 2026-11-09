@@ -675,6 +675,11 @@ func validateResourceServices(value any) error {
 		if !scopeOK || (scope != "system" && scope != "user") {
 			return fmt.Errorf("%s.scope must be system or user", path)
 		}
+		if dependencies, exists := mapping["dependencies"]; exists {
+			if err := validateServiceDependencies(dependencies); err != nil {
+				return fmt.Errorf("%s: %w", path, err)
+			}
+		}
 		if err := validateFilters(mapping, path); err != nil {
 			return err
 		}

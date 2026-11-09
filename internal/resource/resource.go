@@ -31,17 +31,20 @@ type System interface {
 }
 
 type Options struct {
-	Profile         string
-	RootPath        string
-	User            string
-	DryRun          bool
-	Yes             bool
-	Replace         bool
-	RestartServices bool
-	Input           io.Reader
-	Output          io.Writer
-	OutputFormat    string
-	SuppressPlan    bool
+	Profile             string
+	RootPath            string
+	User                string
+	DryRun              bool
+	Yes                 bool
+	Replace             bool
+	RestartServices     bool
+	Input               io.Reader
+	Output              io.Writer
+	OutputFormat        string
+	SuppressPlan        bool
+	ServiceTracker      *ServiceTracker
+	DeferServiceActions bool
+	NonInteractive      bool
 }
 
 type StagePlan struct {
@@ -70,12 +73,13 @@ type Plan struct {
 	Services        StagePlan
 	ExecutableLinks StagePlan
 	Directories     StagePlan
+	ServiceActions  []ServiceAction
 }
 
 var errConfigConflict = errors.New("config target conflict")
 
 func (p Plan) Changes() int {
-	changes := 0
+	changes := len(p.ServiceActions)
 	for _, stage := range p.Stages() {
 		changes += stage.Plan.Changes()
 	}
@@ -91,6 +95,19 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, option
 			return Plan{}, err
 		}
 		*stage.plan(&plan) = planned
+	}
+	tracker := options.ServiceTracker
+	if tracker == nil {
+		var err error
+		tracker, err = PrepareServices(ctx, m, s, options, system)
+		if err != nil {
+			return Plan{}, err
+		}
+	}
+	var err error
+	plan.ServiceActions, err = tracker.Actions(s)
+	if err != nil {
+		return Plan{}, err
 	}
 	return plan, nil
 }
@@ -140,6 +157,21 @@ func InspectConfig(mapping string, options Options) (ConfigStatus, error) {
 
 func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) error {
 	options = normalize(options, m)
+	tracker := options.ServiceTracker
+	if tracker == nil {
+		var err error
+		tracker, err = PrepareServices(ctx, m, s, options, system)
+		if err != nil {
+			return err
+		}
+	}
+	options.ServiceTracker = tracker
+	options.NonInteractive = options.NonInteractive || !interactiveServiceInput(options.Input)
+	if !options.DryRun {
+		if err := tracker.Checkpoint(s); err != nil {
+			return err
+		}
+	}
 	plan, err := BuildPlan(ctx, m, s, options, system)
 	if err != nil {
 		return err
@@ -148,7 +180,10 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		printPlan(options.Output, plan, options.OutputFormat)
 	}
 	if plan.Changes() == 0 || options.DryRun {
-		return nil
+		if options.DeferServiceActions {
+			return nil
+		}
+		return tracker.Finish(ctx, s, options, system)
 	}
 
 	reader, ok := options.Input.(*bufio.Reader)
@@ -163,11 +198,6 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 	for index := range stages {
 		stage := &stages[index]
 		if stage.plan.Changes() == 0 {
-			if stage.definition.name == "configs" && !options.DryRun {
-				if err := refreshServicesAfterConfigs(ctx, stages, m, s, plan.Configs.Declared, options, system); err != nil {
-					return err
-				}
-			}
 			continue
 		}
 		if !options.Yes {
@@ -187,19 +217,35 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		if err := stage.definition.apply(ctx, stage.plan, m, s, options, system); err != nil {
 			return err
 		}
+		if stage.definition.name == "services" {
+			for _, name := range stage.plan.Missing {
+				current, err := tracker.snapshot(name)
+				if err != nil {
+					return err
+				}
+				tracker.records[name] = state.ServiceTracking{Applied: current}
+			}
+		}
 		items := append([]string{}, s.Items(state.ManagedKey, stage.definition.stateKey)...)
 		items = subtract(items, stage.plan.Extra)
 		items = append(items, stage.plan.Adopted...)
 		items = append(items, stage.plan.Missing...)
 		if stage.definition.name == "configs" {
 			items = matchingConfigs(stage.plan.Declared, options)
-			if err := refreshServicesAfterConfigs(ctx, stages, m, s, plan.Configs.Declared, options, system); err != nil {
+			changed := append(append([]string{}, stage.plan.Missing...), stage.plan.Extra...)
+			if err := refreshServicesAfterConfigs(ctx, stages, m, s, changed, options, system); err != nil {
 				return err
 			}
 		}
 		s.SetItems(items, state.ManagedKey, stage.definition.stateKey)
 	}
-	return s.Write()
+	if err := s.Write(); err != nil {
+		return err
+	}
+	if options.DeferServiceActions {
+		return nil
+	}
+	return tracker.Finish(ctx, s, options, system)
 }
 
 // Clean removes only resources recorded as managed that are no longer
@@ -217,6 +263,18 @@ func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Op
 		}
 		s.SetItems(subtract(s.Items(state.ManagedKey, stage.stateKey), stagePlan.Extra), state.ManagedKey, stage.stateKey)
 	}
+	records, err := s.ServiceTracking()
+	if err != nil {
+		return err
+	}
+	for name := range records {
+		if !contains(s.Items(state.ManagedKey, state.ManagedServices), name) {
+			delete(records, name)
+		}
+	}
+	if _, exists := s.Data["service_tracking"]; exists {
+		s.SetServiceTracking(records)
+	}
 	return s.Write()
 }
 
@@ -226,22 +284,6 @@ func refreshServicesAfterConfigs(ctx context.Context, stages []plannedResourceSt
 	}
 	if err := refreshServicePlan(ctx, stages, m, s, options, system); err != nil {
 		return err
-	}
-	if !options.RestartServices {
-		return nil
-	}
-	services, err := findPlannedStage(stages, "services")
-	if err != nil {
-		return err
-	}
-	for _, service := range services.plan.Declared {
-		if !configMatchesService(declared, service, options) {
-			continue
-		}
-		userService := strings.HasPrefix(service, "user:")
-		if err := system.RestartService(ctx, userService, strings.TrimPrefix(service, "user:")); err != nil {
-			return err
-		}
 	}
 	return nil
 }

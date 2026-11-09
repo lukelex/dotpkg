@@ -115,7 +115,7 @@ Common options:
   --resources        Also reconcile groups, config links, and services
   --root PATH        Dotfiles root for resource paths
   --replace          Replace conflicting config targets
-  --restart-services Restart services backed by config links
+  --restart-services Approve detected service reloads/restarts
   --output FORMAT    Plan output: text or json (default: text)
   --timeout DURATION Command timeout (default: 10m, 0 disables)
   --backend-timeout DURATION AUR HTTP timeout (default: 30s)
@@ -180,7 +180,7 @@ func (f *commonFlags) register(set *flag.FlagSet) {
 	set.BoolVar(&f.resources, "resources", false, "reconcile groups, configs, and services")
 	set.StringVar(&f.root, "root", "", "dotfiles root for resources")
 	set.BoolVar(&f.replace, "replace", false, "replace conflicting config targets")
-	set.BoolVar(&f.restartServices, "restart-services", false, "restart services backed by config links")
+	set.BoolVar(&f.restartServices, "restart-services", false, "approve detected service reloads/restarts")
 	set.StringVar(&f.output, "output", "text", "plan output format")
 	set.DurationVar(&f.timeout, "timeout", 10*time.Minute, "command timeout; 0 disables")
 	set.DurationVar(&f.backendTimeout, "backend-timeout", 30*time.Second, "AUR HTTP timeout")

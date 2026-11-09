@@ -34,6 +34,8 @@ type Options struct {
 	RootPath          string
 	Replace           bool
 	RestartServices   bool
+	serviceTracker    *resource.ServiceTracker
+	NonInteractive    bool
 	ResourceSystem    resource.System
 	AppImageSystem    appimage.System
 	GitHubSystem      githubsource.System
@@ -211,6 +213,10 @@ func (o Options) normalize() (Options, error) {
 	}
 	if o.Input == nil {
 		o.Input = os.Stdin
+	}
+	if file, ok := o.Input.(*os.File); ok {
+		info, err := file.Stat()
+		o.NonInteractive = o.NonInteractive || err != nil || info.Mode()&os.ModeCharDevice == 0
 	}
 	if _, buffered := o.Input.(*bufio.Reader); !buffered {
 		o.Input = bufio.NewReader(o.Input)

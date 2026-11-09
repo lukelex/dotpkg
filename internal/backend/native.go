@@ -81,6 +81,21 @@ func (n *nativeResources) RestartService(ctx context.Context, user bool, service
 	return nil
 }
 
+func (n *nativeResources) ServiceActive(ctx context.Context, user bool, service string) (bool, error) {
+	_, err := n.Runner.Output(ctx, "systemctl", serviceArgs(user, "is-active", "--quiet", service))
+	if err == nil {
+		return true, nil
+	}
+	if code, ok := exitCode(err); ok && (code == 3 || code == 4) {
+		return false, nil
+	}
+	return false, fmt.Errorf("check active service %s: %w", service, err)
+}
+
+func (n *nativeResources) ReloadService(ctx context.Context, user bool, service string) error {
+	return n.runSystemctl(ctx, user, "reload", service)
+}
+
 func (n *nativeResources) EnableService(ctx context.Context, user bool, service string) error {
 	if err := n.runSystemctl(ctx, user, "enable", "--now", service); err != nil {
 		return fmt.Errorf("enable service %s: %w", service, err)

@@ -26,35 +26,44 @@ type fakeSystem struct {
 }
 
 func (f *fakeSystem) CurrentGroups(context.Context, string) ([]string, error) { return f.groups, nil }
+
 func (f *fakeSystem) GroupExists(_ context.Context, name string) (bool, error) {
 	return f.groupExists[name], nil
 }
+
 func (f *fakeSystem) AddToGroup(_ context.Context, _, group string) error {
 	f.addedGroups = append(f.addedGroups, group)
 	return nil
 }
+
 func (f *fakeSystem) RemoveFromGroup(_ context.Context, _, group string) error {
 	f.removedGroups = append(f.removedGroups, group)
 	return nil
 }
+
 func (f *fakeSystem) ServiceExists(_ context.Context, user bool, name string) (bool, error) {
 	return f.services[serviceKey(user, name)], nil
 }
+
 func (f *fakeSystem) ServiceEnabled(_ context.Context, user bool, name string) (bool, error) {
 	return f.serviceState[serviceKey(user, name)], nil
 }
+
 func (f *fakeSystem) EnableService(_ context.Context, user bool, name string) error {
 	f.enabled = append(f.enabled, serviceKey(user, name))
 	return nil
 }
+
 func (f *fakeSystem) DisableService(_ context.Context, user bool, name string) error {
 	f.disabled = append(f.disabled, serviceKey(user, name))
 	return nil
 }
+
 func (f *fakeSystem) ReloadServices(_ context.Context, user bool) error {
 	f.reloaded = append(f.reloaded, serviceKey(user, "daemon-reload"))
 	return nil
 }
+
 func (f *fakeSystem) RestartService(_ context.Context, user bool, name string) error {
 	f.restarted = append(f.restarted, serviceKey(user, name))
 	return nil
@@ -628,7 +637,7 @@ profiles:
 	if !reflect.DeepEqual(system.enabled, []string{"user:tool.service"}) {
 		t.Fatalf("enabled services = %#v", system.enabled)
 	}
-	if !reflect.DeepEqual(system.restarted, []string{"user:tool.service"}) {
+	if len(system.restarted) != 0 {
 		t.Fatalf("restarted services = %#v", system.restarted)
 	}
 }

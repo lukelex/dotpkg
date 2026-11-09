@@ -335,9 +335,56 @@ managed by dotpkg. Paths may use `$HOME`, `$XDG_CONFIG_HOME`, or a leading `~/`.
 Config sources must remain inside the configured root, targets are restricted
 to approved home/XDG locations, and broken or escaping symlinks are rejected.
 Existing conflicting targets are preserved unless `--replace` is supplied.
-System services use `sudo`; user services are tracked separately. Config-linked
-services are restarted only with the explicit `--restart-services` flag, and
-systemd daemon reloads are performed when unit files change.
+System services use `sudo`; user services are tracked separately.
+
+### Automatic service actions
+
+With `--resources`, dotpkg detects changes to tracked services' unit files,
+unit-specific drop-in directories, and explicitly declared file/directory inputs.
+It also detects packages changed by dotpkg when they declare the service in their
+metadata or appear as an explicit dependency. Package versions changed by other
+tools and transitive systemd/library dependencies are not inspected.
+
+```yaml
+resources:
+  services:
+    - name: tracker.service
+      scope: user
+      dependencies:
+        - path: $XDG_CONFIG_HOME/tracker/config.yaml
+          action: reload
+        - path: scripts/tracker.sh
+        - package: tracker
+```
+
+Paths may be absolute, root-relative, use environment variables, or start with
+`~/`. Directories include their contents recursively, following symlinks with
+cycle detection. Use the installed/linked path when the source and destination
+can differ. Existing package service declarations remain valid; explicit service
+objects can add dependencies to the same service.
+
+The default action is restart; any restart dependency takes precedence over
+reload dependencies. Unit and package changes always require restart, with a
+systemd daemon-reload for changed units. An explicit reload failure stays pending
+and never silently escalates to restart.
+
+The first observation records a baseline without restarting existing services.
+Subsequent runs detect content edits even when an existing symlink is unchanged.
+After dependency-changing stages succeed, dotpkg lists affected services and
+reasons and asks once for approval. `--yes` or `--restart-services` approves these
+detected actions; the latter no longer forces restarts of unchanged services.
+Unattended runs without either flag only report pending actions.
+
+Declined and failed actions survive later runs in `service_tracking` state.
+Reverting file contents to their applied baseline cancels those file reasons;
+package reasons remain until handled. Inactive services stay stopped and clear
+their pending actions. Newly enabled services do not receive redundant restarts.
+Tracking is discarded when a service leaves management.
+
+Dry-runs show actions without updating baselines. Unreadable dependencies produce
+an error and preserve prior tracking. Service-action failures are reported after
+attempting the other services, retain failed actions, and do not roll back
+successful package changes.
 
 AppImages are handled as a separate managed artifact stage rather than passed
 to `pacman`, `apt`, or `dnf`. The node supplies an HTTPS `address`; a checksum
