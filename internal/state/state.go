@@ -56,7 +56,7 @@ const (
 	// ManagedKey identifies the managed-resource section of the state file.
 	ManagedKey = "managed"
 
-	// ManagedPackages identifies the state field for managed packages.
+	// ManagedPackages identifies the managed package list.
 	ManagedPackages = "packages"
 
 	// ManagedPackageOrigins identifies the state field for package origins.

@@ -55,18 +55,18 @@ func New() *System {
 	}}, api: "https://api.github.com", archive: "https://codeload.github.com"}
 }
 
-// Record describes a managed installation.
-type Record struct{ Repository, Target, Commit string }
-
-// Change describes an installation or removal.
-type Change struct{ Name, Action, Old, New string }
-
-// Plan describes the changes needed to reach the declared state.
-type Plan struct {
-	Changes  []Change
-	Specs    map[string]manifest.RemoteBundle
-	Previous map[string]state.RemoteBundle
-}
+type (
+	// Record describes a managed installation.
+	Record struct{ Repository, Target, Commit string }
+	// Change describes an installation or removal.
+	Change struct{ Name, Action, Old, New string }
+	// Plan describes the changes needed to reach the declared state.
+	Plan struct {
+		Changes  []Change
+		Specs    map[string]manifest.RemoteBundle
+		Previous map[string]state.RemoteBundle
+	}
+)
 
 // Count returns the number of planned changes.
 func (p Plan) Count() int { return len(p.Changes) }
