@@ -2,22 +2,19 @@
 
 ## Local checks
 
-Run the same checks used before committing:
+Run the full CI-equivalent checks in Docker:
 
 ```sh
-gofmt -w cmd internal
-go install mvdan.cc/gofumpt@v0.12.0
-"$(go env GOPATH)/bin/gofumpt" -w cmd internal
-go install github.com/mgechev/revive@v1.17.1
-"$(go env GOPATH)/bin/revive" -config revive.toml -set_exit_status ./...
-go test ./...
-go vet ./...
-git diff --check
+docker build --target checks .
+docker compose run --rm dev git -c safe.directory=/workspace diff --check
 ```
 
-CI checks both `gofmt` and `gofumpt` formatting. Revive uses the default rules
-listed in `revive.toml`; `go vet` and `staticcheck` provide broader static
-analysis.
+The checks stage uses CI's Go version and runs formatting, Revive, tests,
+race tests, vet, staticcheck, vulnerability scanning, and integration tests.
+The separately mounted Compose command checks uncommitted whitespace changes,
+which are not part of the Docker build context. To format code, run
+`docker compose run --rm dev gofmt -w cmd internal` and
+`docker compose run --rm dev go run mvdan.cc/gofumpt@v0.12.0 -w cmd internal`.
 
 Inspect the CLI with:
 

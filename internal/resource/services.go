@@ -63,20 +63,6 @@ func configProvidesService(configs []string, service string, options Options, al
 	return false
 }
 
-func configMatchesService(configs []string, service string, options Options) bool {
-	for _, mapping := range configs {
-		source, target, err := configPaths(mapping, options)
-		if err != nil || !strings.HasSuffix(filepath.ToSlash(target), servicePath(service)) {
-			continue
-		}
-		matches, err := configMatches(target, source)
-		if err == nil && matches {
-			return true
-		}
-	}
-	return false
-}
-
 func servicePath(service string) string {
 	name := strings.TrimPrefix(service, "user:")
 	if strings.HasPrefix(service, "user:") {

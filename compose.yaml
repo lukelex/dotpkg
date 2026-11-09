@@ -9,6 +9,7 @@ services:
     environment:
       CGO_ENABLED: "0"
       GOTOOLCHAIN: local
+      GOFLAGS: -buildvcs=false
     volumes:
       - .:/workspace
       - go-mod-cache:/go/pkg/mod
