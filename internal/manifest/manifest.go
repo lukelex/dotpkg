@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -301,7 +303,96 @@ func validateResources(value any) error {
 			return err
 		}
 	}
+	if bundles, ok := resources["remote_bundles"]; ok {
+		items, ok := bundles.([]any)
+		if !ok {
+			return fmt.Errorf("resources.remote_bundles must be a list")
+		}
+		seen := map[string]bool{}
+		var targets []string
+		for i, item := range items {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				return fmt.Errorf("resources.remote_bundles[%d] must be a mapping", i)
+			}
+			for key := range entry {
+				switch key {
+				case "name", "repository", "paths", "target", "commit":
+				default:
+					return fmt.Errorf("resources.remote_bundles[%d].%s is unsupported", i, key)
+				}
+			}
+			name, _ := entry["name"].(string)
+			repo, _ := entry["repository"].(string)
+			target, _ := entry["target"].(string)
+			paths, pathsOK := stringSlice(entry["paths"])
+			if !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]*$`).MatchString(name) || !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*/[a-zA-Z0-9][a-zA-Z0-9_.-]*$`).MatchString(repo) || !strings.HasPrefix(target, "$HOME/.local/share/dotpkg/") || !safeRemotePath(strings.TrimPrefix(target, "$HOME/.local/share/dotpkg/")) {
+				return fmt.Errorf("resources.remote_bundles[%d] has an unsafe name, repository, or target", i)
+			}
+			if !pathsOK || len(paths) == 0 || len(paths) > 20 {
+				return fmt.Errorf("resources.remote_bundles[%d].paths must be a non-empty list of at most 20 paths", i)
+			}
+			destinations := map[string]bool{}
+			for _, source := range paths {
+				if !safeRemotePath(source) || path.Base(source) == ".dotpkg-bundle.json" || destinations[path.Base(source)] {
+					return fmt.Errorf("resources.remote_bundles[%d].paths contains an unsafe or overlapping path: %s", i, source)
+				}
+				destinations[path.Base(source)] = true
+				for _, other := range paths {
+					if other != source && strings.HasPrefix(other, source+"/") {
+						return fmt.Errorf("resources.remote_bundles[%d].paths overlap: %s and %s", i, source, other)
+					}
+				}
+			}
+			if seen[name] {
+				return fmt.Errorf("duplicate remote bundle %s", name)
+			}
+			for _, other := range targets {
+				if target == other || strings.HasPrefix(target, other+"/") || strings.HasPrefix(other, target+"/") {
+					return fmt.Errorf("remote bundle targets overlap: %s and %s", target, other)
+				}
+			}
+			targets = append(targets, target)
+			seen[name] = true
+			if commit, exists := entry["commit"]; exists {
+				sha, ok := commit.(string)
+				if !ok || !regexp.MustCompile(`^[a-fA-F0-9]{40}$`).MatchString(sha) {
+					return fmt.Errorf("resources.remote_bundles[%d].commit must be a 40-character commit SHA", i)
+				}
+			}
+		}
+	}
 	return nil
+}
+
+func safeRemotePath(value string) bool {
+	if value == "" || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") || path.Clean(value) != value {
+		return false
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "." || part == ".." || part == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// RemoteBundle selects repository paths to copy into one managed directory.
+type RemoteBundle struct {
+	Name, Repository, Target, Commit string
+	Paths                            []string
+}
+
+func (m *Manifest) RemoteBundles() []RemoteBundle {
+	var result []RemoteBundle
+	entries, _ := m.Value("resources.remote_bundles").([]any)
+	for _, item := range entries {
+		entry := item.(map[string]any)
+		paths, _ := stringSlice(entry["paths"])
+		commit, _ := entry["commit"].(string)
+		result = append(result, RemoteBundle{Name: entry["name"].(string), Repository: entry["repository"].(string), Target: entry["target"].(string), Commit: strings.ToLower(commit), Paths: paths})
+	}
+	return result
 }
 
 func validateConfigs(value any, path string) error {

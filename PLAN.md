@@ -116,6 +116,7 @@ managed:
   groups: [...]
   configs: [...]
   services: [...]
+  remote_bundles: {...}
 ```
 
 Without `--resources`, the package executable only modifies
@@ -123,6 +124,12 @@ Without `--resources`, the package executable only modifies
 `current.selections`, and `managed.packages` when used against the existing
 dotfiles state file. With `--resources`, it additionally owns the managed
 groups, configs, and services fields.
+
+`managed.remote_bundles` records the GitHub repository, selected paths,
+destination, and installed commit for each declared remote bundle. This field
+has its records changed only during full-resource reconciliation; package-only
+operations preserve existing records. See
+[README.md](README.md#resources-and-safety) for current remote bundle behavior.
 
 ## Compatibility and hardening checklist
 

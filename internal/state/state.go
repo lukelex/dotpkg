@@ -25,6 +25,11 @@ type AppImage struct {
 	Version   string
 }
 
+type RemoteBundle struct {
+	Repository, Target, Commit string
+	Paths                      []string
+}
+
 const CurrentVersion = 1
 
 func New(path string) *State {
@@ -111,6 +116,10 @@ func migrate(data map[string]any) (bool, error) {
 		managed["appimages"] = map[string]any{}
 		migrated = true
 	}
+	if _, ok := managed["remote_bundles"]; !ok {
+		managed["remote_bundles"] = map[string]any{}
+		migrated = true
+	}
 	data["version"] = CurrentVersion
 	return migrated, nil
 }
@@ -192,6 +201,26 @@ func validate(data map[string]any) error {
 			}
 		}
 	}
+	if bundles, exists := managedMap["remote_bundles"]; exists {
+		entries, ok := bundles.(map[string]any)
+		if !ok {
+			return fmt.Errorf("managed.remote_bundles must be a mapping")
+		}
+		for name, value := range entries {
+			fields, ok := value.(map[string]any)
+			if name == "" || !ok {
+				return fmt.Errorf("managed.remote_bundles.%s must be a mapping", name)
+			}
+			for _, key := range []string{"repository", "target", "commit"} {
+				if text, ok := fields[key].(string); !ok || text == "" {
+					return fmt.Errorf("managed.remote_bundles.%s.%s must be a non-empty string", name, key)
+				}
+			}
+			if err := validateStringList(fields["paths"], "managed.remote_bundles."+name+".paths"); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -216,11 +245,38 @@ func defaultData() map[string]any {
 			"packages":        []any{},
 			"package_origins": map[string]any{},
 			"appimages":       map[string]any{},
+			"remote_bundles":  map[string]any{},
 			"groups":          []any{},
 			"configs":         []any{},
 			"services":        []any{},
 		},
 	}
+}
+
+func (s *State) RemoteBundles() map[string]RemoteBundle {
+	result := map[string]RemoteBundle{}
+	entries, _ := s.Data["managed"].(map[string]any)["remote_bundles"].(map[string]any)
+	for name, value := range entries {
+		fields, _ := value.(map[string]any)
+		var paths []string
+		for _, item := range fields["paths"].([]any) {
+			paths = append(paths, item.(string))
+		}
+		result[name] = RemoteBundle{Repository: fields["repository"].(string), Target: fields["target"].(string), Commit: fields["commit"].(string), Paths: paths}
+	}
+	return result
+}
+
+func (s *State) SetRemoteBundles(bundles map[string]RemoteBundle) {
+	entries := map[string]any{}
+	for name, bundle := range bundles {
+		paths := make([]any, len(bundle.Paths))
+		for i, item := range bundle.Paths {
+			paths[i] = item
+		}
+		entries[name] = map[string]any{"repository": bundle.Repository, "target": bundle.Target, "commit": bundle.Commit, "paths": paths}
+	}
+	s.Set(entries, "managed", "remote_bundles")
 }
 
 func (s *State) Get(path ...string) (any, bool) {

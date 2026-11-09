@@ -77,7 +77,8 @@ dotpkg sync --manifest packages.yaml --profile desktop --yes
 Use `--output json` with `plan`, `diff`, `sync`, or `clean` for one unified,
 machine-readable plan document. The output uses schema version 1 and is
 specified in [`schema/plan-v1.json`](schema/plan-v1.json); it includes package,
-group, config, and service stages plus normalized change actions.
+AppImage, group, config, service, and declared remote-bundle stages plus
+normalized change actions. Bundle changes include old → new commit SHAs.
 
 `clean` is destructive but limited to managed items no longer declared. It
 never installs or adopts anything and prompts unless `--yes` is supplied.
@@ -90,8 +91,10 @@ the subsequent sync fails. Run `recover` when a journal remains after an
 interrupted process. State writes keep the previous file at `state.yaml.bak`.
 
 `doctor` is read-only. It checks package installation and availability, state
-validity, config links and sources, group membership, services, and backend
-support. It exits nonzero when it finds errors. Use `--output json` for a
+validity, config links and sources, group membership, services, remote bundle
+revisions and content, and backend support. Unpinned bundles require an upstream
+revision check; network failure is reported as an error. It exits nonzero when
+it finds errors. Use `--output json` for a
 machine-readable report. Commands have a 10-minute timeout by default; use
 `--timeout 0` to disable it. AUR behavior can be tuned with
 `--backend-timeout`, `--aur-retries`, and `--aur-retry-delay`; `--verbose`
@@ -153,6 +156,17 @@ profile matches and every listed selection is enabled. Service scopes are
 files linked under systemd directories trigger the appropriate daemon reload,
 and system service changes run through `sudo`.
 
+Remote bundles are separate from package nodes and config links. Declare a
+GitHub `owner/repo`, one or more file or directory `paths`, and a destination
+under `$HOME/.local/share/dotpkg/`; see the example and safety rules in
+[README.md](README.md#resources-and-safety). Only requested paths are copied,
+under their basenames, without executing them. Plan and full-resource sync
+resolve the default-branch commit on every unpinned run; `commit` pins a revision
+without checking for newer commits. Use `--resources` with sync, plan, or clean
+to include the remote resource; doctor checks declared bundles directly.
+Package-only sync skips them.
+Network tests should use a local HTTP server rather than live GitHub.
+
 Manifest fields consumed by dotpkg are structurally validated before planning.
 Unknown metadata is preserved for compatibility with the surrounding dotfiles
 manifest.
@@ -168,8 +182,10 @@ by default. To invoke them explicitly:
 
 The adapter downloads and checksum-verifies the pinned release into an ignored
 cache, then invokes `dotpkg sync` with the existing manifest and shared state
-paths. A normal sync delegates groups, configuration links, and services too.
-`--packages-only` stops after the package stage.
+paths. A normal sync delegates groups, configuration links, services, and
+declared remote bundles too. `--packages-only` skips resource stages. Existing
+installations must use `./linux/install/sync --refresh-manifest` to adopt a new
+repository declaration; local manifests are not refreshed automatically.
 
 The integration is pinned to a release rather than downloading `latest`. See
 [RELEASE.md](RELEASE.md) for asset verification details.

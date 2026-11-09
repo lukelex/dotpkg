@@ -16,6 +16,7 @@ import (
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/recovery"
+	"github.com/lukelex/dotpkg/internal/remotebundle"
 	"github.com/lukelex/dotpkg/internal/resource"
 	"github.com/lukelex/dotpkg/internal/state"
 )
@@ -34,6 +35,7 @@ type Options struct {
 	RestartServices bool
 	ResourceSystem  resource.System
 	AppImageSystem  appimage.System
+	RemoteSystem    *remotebundle.System
 	Input           io.Reader
 	Output          io.Writer
 	OutputFormat    string
@@ -668,13 +670,19 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 	packagePlan := Plan{Declared: declared, Extra: subtract(s.Packages(), declared)}
 	appImagePlan := BuildAppImageCleanPlan(m, s, options.Profile)
 	var resourcePlan *resource.Plan
+	var bundlePlan *remotebundle.Plan
 	if options.Resources {
+		planned := remotebundle.CleanPlan(m.RemoteBundles(), s.RemoteBundles())
+		bundlePlan = &planned
 		resourceOptions := resource.Options{Profile: options.Profile, RootPath: options.RootPath, Output: options.Output}
-		planned := resource.CleanPlan(m, s, resourceOptions)
-		resourcePlan = &planned
+		resourcePlanned := resource.CleanPlan(m, s, resourceOptions)
+		resourcePlan = &resourcePlanned
 	}
-	printPlan(options.Output, packagePlan, options.OutputFormat, resourcePlan, options, appImagePlan)
+	printPlan(options.Output, packagePlan, options.OutputFormat, resourcePlan, bundlePlan, options, appImagePlan)
 	changes := len(packagePlan.Extra) + len(appImagePlan.Extra)
+	if bundlePlan != nil {
+		changes += bundlePlan.Count()
+	}
 	if resourcePlan != nil {
 		changes += resourcePlan.Changes()
 	}
@@ -766,6 +774,20 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 			return err
 		}
 	}
+	if bundlePlan != nil {
+		for _, change := range bundlePlan.Changes {
+			previous := s.RemoteBundles()[change.Name]
+			if err := remotebundle.Remove(change.Name, previous); err != nil {
+				return err
+			}
+			bundles := s.RemoteBundles()
+			delete(bundles, change.Name)
+			s.SetRemoteBundles(bundles)
+			if err := s.Write(); err != nil {
+				return err
+			}
+		}
+	}
 	if len(packagePlan.Extra) > 0 || len(appImagePlan.Extra) > 0 {
 		journal.Completed = true
 		if err := journal.Write(); err != nil {
@@ -816,6 +838,18 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	if err != nil {
 		return err
 	}
+	var bundlePlan *remotebundle.Plan
+	if options.Resources {
+		remoteSystem := options.RemoteSystem
+		if remoteSystem == nil {
+			remoteSystem = remotebundle.New()
+		}
+		planned, remoteErr := remoteSystem.Build(ctx, m.RemoteBundles(), s.RemoteBundles())
+		if remoteErr != nil {
+			return remoteErr
+		}
+		bundlePlan = &planned
+	}
 	var resourcePlan *resource.Plan
 	if options.Resources && options.OutputFormat == "json" {
 		resourceSystem, resourceErr := resourceBackend(options, system)
@@ -832,7 +866,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		}
 		resourcePlan = &planned
 	}
-	printPlan(options.Output, plan, options.OutputFormat, resourcePlan, options, appImagePlan)
+	printPlan(options.Output, plan, options.OutputFormat, resourcePlan, bundlePlan, options, appImagePlan)
 	if plan.Changes() == 0 && appImagePlan.Changes() == 0 {
 		if options.OutputFormat == "text" {
 			fmt.Fprintln(options.Output, "packages and AppImages: already synchronized")
@@ -842,7 +876,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		}
 	}
 	if options.DryRun {
-		return syncResources(ctx, m, s, options, system)
+		return syncResources(ctx, m, s, options, system, bundlePlan)
 	}
 	apply := options.Yes
 	if !options.Yes {
@@ -852,7 +886,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		}
 	}
 	if !apply {
-		return syncResources(ctx, m, s, options, system)
+		return syncResources(ctx, m, s, options, system, bundlePlan)
 	}
 	repository, aur, err := splitByOrigin(m, plan.Missing)
 	if err != nil {
@@ -938,7 +972,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 	if err := s.Write(); err != nil {
 		return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
 	}
-	if err := syncResources(ctx, m, s, options, system); err != nil {
+	if err := syncResources(ctx, m, s, options, system, bundlePlan); err != nil {
 		if packageChanges > 0 || appImageChanges > 0 {
 			return packageFailure(err, ctx, system, appSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
@@ -1087,7 +1121,7 @@ func appImageBackend(options Options) (appimage.System, error) {
 	return appimage.New(), nil
 }
 
-func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system backend.Backend) error {
+func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system backend.Backend, bundlePlan *remotebundle.Plan) error {
 	if !options.Resources {
 		return nil
 	}
@@ -1101,7 +1135,7 @@ func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, op
 			return err
 		}
 	}
-	return resource.Sync(ctx, m, s, resource.Options{
+	if err := resource.Sync(ctx, m, s, resource.Options{
 		Profile:         options.Profile,
 		RootPath:        options.RootPath,
 		DryRun:          options.DryRun,
@@ -1112,7 +1146,58 @@ func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, op
 		Output:          options.Output,
 		OutputFormat:    options.OutputFormat,
 		SuppressPlan:    options.OutputFormat == "json",
-	}, resourceSystem)
+	}, resourceSystem); err != nil {
+		return err
+	}
+	if bundlePlan == nil || options.DryRun || bundlePlan.Count() == 0 {
+		return nil
+	}
+	remoteSystem := options.RemoteSystem
+	if remoteSystem == nil {
+		remoteSystem = remotebundle.New()
+	}
+	for _, change := range bundlePlan.Changes {
+		if !options.Yes {
+			prompt := "Install remote skill bundle " + change.Name + "? [y/N] "
+			if change.Action == "remove" {
+				prompt = "Remove stale remote skill bundle " + change.Name + "? [y/N] "
+			}
+			apply, err := askSelection(options, prompt, false)
+			if err != nil {
+				return err
+			}
+			if !apply {
+				continue
+			}
+		}
+		if change.Action == "remove" {
+			if err := remotebundle.Remove(change.Name, bundlePlan.Previous[change.Name]); err != nil {
+				return err
+			}
+			bundles := s.RemoteBundles()
+			delete(bundles, change.Name)
+			s.SetRemoteBundles(bundles)
+			if err := s.Write(); err != nil {
+				return err
+			}
+			continue
+		}
+		spec := bundlePlan.Specs[change.Name]
+		previous := bundlePlan.Previous[change.Name]
+		if err := remoteSystem.Install(ctx, spec, previous, func() error {
+			bundles := s.RemoteBundles()
+			target, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			bundles[change.Name] = state.RemoteBundle{Repository: spec.Repository, Target: filepath.Join(target, strings.TrimPrefix(spec.Target, "$HOME/")), Commit: spec.Commit, Paths: spec.Paths}
+			s.SetRemoteBundles(bundles)
+			return s.Write()
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func resourceBackend(options Options, system backend.Backend) (resource.System, error) {
@@ -1136,13 +1221,33 @@ func setCurrentState(s *state.State, m *manifest.Manifest, options Options) {
 	s.Set(m.Digest(), "current", "manifest_sha256")
 }
 
-func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resource.Plan, options Options, appImagePlans ...AppImagePlan) {
+func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resource.Plan, bundlePlan *remotebundle.Plan, options Options, appImagePlans ...AppImagePlan) {
 	if format == "json" {
+		var document PlanDocument
 		if len(appImagePlans) > 0 {
-			_ = json.NewEncoder(output).Encode(NewPlanDocument(plan, resourcePlan, options, appImagePlans[0]))
+			document = NewPlanDocument(plan, resourcePlan, options, appImagePlans[0])
 		} else {
-			_ = json.NewEncoder(output).Encode(NewPlanDocument(plan, resourcePlan, options))
+			document = NewPlanDocument(plan, resourcePlan, options)
 		}
+		if bundlePlan != nil && (len(bundlePlan.Specs) > 0 || len(bundlePlan.Previous) > 0) {
+			stage := PlanStage{Name: "remote_bundles", Declared: []string{}, Adopted: []string{}, Missing: []string{}, Extra: []string{}, Changes: []PlanChange{}}
+			for name := range bundlePlan.Specs {
+				stage.Declared = append(stage.Declared, name)
+			}
+			sort.Strings(stage.Declared)
+			for _, change := range bundlePlan.Changes {
+				item := change.Name + ": " + shaLabel(change.Old) + " → " + shaLabel(change.New)
+				stage.Changes = append(stage.Changes, PlanChange{Action: change.Action, Item: item})
+				if change.Action == "remove" {
+					stage.Extra = append(stage.Extra, change.Name)
+				} else {
+					stage.Missing = append(stage.Missing, change.Name)
+				}
+			}
+			document.Stages = append(document.Stages, stage)
+			document.Changes += len(stage.Changes)
+		}
+		_ = json.NewEncoder(output).Encode(document)
 		return
 	}
 	fmt.Fprintln(output, "PACKAGES")
@@ -1170,6 +1275,12 @@ func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resourc
 			}
 		}
 	}
+	if bundlePlan != nil && bundlePlan.Count() > 0 {
+		fmt.Fprintln(output, "REMOTE BUNDLES")
+		for _, change := range bundlePlan.Changes {
+			fmt.Fprintf(output, "  %s: %s %s → %s\n", change.Action, change.Name, shaLabel(change.Old), shaLabel(change.New))
+		}
+	}
 	if resourcePlan != nil {
 		for _, stage := range []struct {
 			name string
@@ -1188,6 +1299,13 @@ func printPlan(output io.Writer, plan Plan, format string, resourcePlan *resourc
 			}
 		}
 	}
+}
+
+func shaLabel(sha string) string {
+	if sha == "" {
+		return "none"
+	}
+	return sha
 }
 
 func splitByOrigin(m *manifest.Manifest, packages []string) ([]string, []string, error) {

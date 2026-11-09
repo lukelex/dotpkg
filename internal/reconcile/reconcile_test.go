@@ -15,6 +15,7 @@ import (
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/recovery"
+	"github.com/lukelex/dotpkg/internal/remotebundle"
 	"github.com/lukelex/dotpkg/internal/resource"
 	"github.com/lukelex/dotpkg/internal/state"
 )
@@ -52,6 +53,19 @@ func TestPlanDocumentUsesVersionedUnifiedSchema(t *testing.T) {
 	}
 	if decoded.Stages[0].Name != "packages" || len(decoded.Stages[0].Changes) != 1 {
 		t.Fatalf("package stage = %#v", decoded.Stages[0])
+	}
+}
+
+func TestRemoteBundleJSONPlanShowsRevisions(t *testing.T) {
+	var output strings.Builder
+	bundle := &remotebundle.Plan{Changes: []remotebundle.Change{{Name: "grill-me", Action: "install", Old: strings.Repeat("a", 40), New: strings.Repeat("b", 40)}}, Specs: map[string]manifest.RemoteBundle{"grill-me": {Name: "grill-me"}}}
+	printPlan(&output, Plan{}, "json", &resource.Plan{}, bundle, Options{ManifestPath: "packages.yaml", Profile: "server"})
+	var doc PlanDocument
+	if err := json.Unmarshal([]byte(output.String()), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Changes != 1 || doc.Stages[len(doc.Stages)-1].Name != "remote_bundles" || !strings.Contains(doc.Stages[len(doc.Stages)-1].Changes[0].Item, strings.Repeat("a", 40)+" → "+strings.Repeat("b", 40)) {
+		t.Fatalf("plan: %s", output.String())
 	}
 }
 

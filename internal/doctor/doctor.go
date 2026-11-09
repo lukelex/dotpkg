@@ -10,6 +10,7 @@ import (
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/reconcile"
+	"github.com/lukelex/dotpkg/internal/remotebundle"
 	"github.com/lukelex/dotpkg/internal/resource"
 	"github.com/lukelex/dotpkg/internal/state"
 )
@@ -73,6 +74,22 @@ func Run(ctx context.Context, m *manifest.Manifest, s *state.State, options reco
 	} else {
 		for _, packageName := range validation.Missing {
 			report.add("error", "availability", fmt.Sprintf("package is unavailable from configured repositories: %s", packageName))
+		}
+	}
+	remoteSystem := options.RemoteSystem
+	if remoteSystem == nil {
+		remoteSystem = remotebundle.New()
+	}
+	bundlePlan, bundleErr := remoteSystem.Build(ctx, m.RemoteBundles(), s.RemoteBundles())
+	if bundleErr != nil {
+		report.add("error", "remote_bundles", bundleErr.Error())
+	} else {
+		for _, change := range bundlePlan.Changes {
+			severity := "error"
+			if change.Action == "remove" {
+				severity = "warning"
+			}
+			report.add(severity, "remote_bundles", fmt.Sprintf("%s: %s → %s (%s)", change.Name, change.Old, change.New, change.Action))
 		}
 	}
 

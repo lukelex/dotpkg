@@ -165,8 +165,8 @@ version    Print the executable version
 
 Use `--output json` with `plan`, `diff`, `sync`, or `clean` for a unified,
 versioned plan document. The schema is [plan-v1.json](schema/plan-v1.json) and
-covers package, group, config, and service actions. `doctor --output json`
-provides a machine-readable diagnostic report.
+covers package, AppImage, remote-bundle, group, config, and service actions.
+`doctor --output json` provides a machine-readable diagnostic report.
 
 Common operational flags include `--dry-run`/`--check`, `--yes`,
 `--profile desktop|server`, `--resources`, `--replace`,
@@ -176,9 +176,9 @@ recorded as managed.
 
 ## Resources and safety
 
-Resource reconciliation is opt-in with `--resources` and covers only declared
-Unix groups, configuration links, and systemd services. Resources can be
-declared independently or attached to packages:
+Resource reconciliation is opt-in with `--resources` and covers declared
+Unix groups, configuration links, systemd services, and remote bundles.
+Groups, links, and services can be declared independently or attached to packages:
 
 ```yaml
 resources:
@@ -193,6 +193,46 @@ resources:
       profiles: [desktop]
       selections: [i3]
 ```
+
+Remote bundles copy only declared files or directories from a GitHub repository.
+For example, the dotfiles manifest requests two skill directories and their license:
+
+```yaml
+resources:
+  remote_bundles:
+    - name: grill-me
+      repository: mattpocock/skills
+      paths: [skills/grill-me, skills/grilling, LICENSE]
+      target: $HOME/.local/share/dotpkg/opencode-skills
+      # commit: 4ae2317ddb22b046e26455e4f9c9b3aaaf62212d
+```
+
+`name` identifies the managed bundle. `repository` is a GitHub `owner/repo`;
+`paths` is a nonempty list of repository-relative paths, each copied under its
+basename in `target`. Paths must have distinct basenames and cannot overlap.
+The destination must be under `$HOME/.local/share/dotpkg/`; it cannot overlap
+another declared bundle. This resource copies files—it does not install
+packages, run scripts, or validate application-specific formats.
+
+Without `commit`, every `plan` or `sync --resources` queries the repository's
+default branch for its current commit, even when the bundle is already
+installed. An unreachable upstream fails the operation rather than reporting
+"up to date." An optional 40-character `commit` uses that exact revision and
+skips the update check. Both pinned and unpinned installations download the
+archive only if the requested revision or installed content has changed.
+Selected paths come from the same commit; HTTPS, timeouts, size limits, and
+archive-path and symlink checks protect extraction. Downloaded content is
+staged before the managed directory is swapped; a download, validation, or
+state-write failure restores the previous installation. The installed commit
+is recorded in state and old → new SHAs appear in text and JSON plans and in
+doctor diagnostics. The local content digest detects changes after installation;
+it is **not** an independently verified upstream checksum.
+
+Dry-run does not write files. Existing user-owned destinations are never
+adopted, even with `--replace`; `clean --resources` removes only stale, intact
+bundles recorded as managed. Sync repairs tracked content drift; clean preserves
+modified bundles and reports a conflict. Without `--resources` (including the dotfiles `--packages-only`
+wrapper), package operations do not query or modify remote bundles.
 
 Config sources must remain inside the configured root, targets are restricted
 to approved home/XDG locations, and broken or escaping symlinks are rejected.
