@@ -80,7 +80,7 @@ func loadManifest(options Options) (*manifest.Manifest, *state.State, reconcile.
 // Publish a complete file atomically without replacing a concurrently created
 // manifest (including a symlink). Only called after approval.
 func createStarter(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".starter-*")

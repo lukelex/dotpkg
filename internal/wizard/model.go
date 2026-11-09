@@ -15,15 +15,20 @@ import (
 	"github.com/lukelex/dotpkg/internal/resource"
 )
 
-type tickMsg time.Time
-type checkedMsg struct {
-	err             error
-	display         string
-	conflicts       []resource.ConfigConflict
-	readyDependents []string
-}
-type actionMsg struct{ err error }
-type utilityMsg struct{ err error }
+type (
+	tickMsg    time.Time
+	checkedMsg struct {
+		err             error
+		display         string
+		conflicts       []resource.ConfigConflict
+		readyDependents []string
+	}
+)
+
+type (
+	actionMsg  struct{ err error }
+	utilityMsg struct{ err error }
+)
 
 type model struct {
 	r                     *runtime
@@ -320,6 +325,7 @@ func (m *model) navigate(key string, n int) {
 		m.cursor = (m.cursor + 1) % n
 	}
 }
+
 func (m *model) review() {
 	m.page = "review"
 	m.steps = m.r.spec.ForProfile(m.r.session.Profile, m.r.options.PackagesOnly)
@@ -477,9 +483,11 @@ func (m *model) showLogs() tea.Cmd {
 	}
 	return tea.ExecProcess(exec.Command(pager, "--", path), func(err error) tea.Msg { return utilityMsg{err} })
 }
+
 func openURL(url string) tea.Cmd {
 	return func() tea.Msg { cmd := exec.Command("xdg-open", url); return utilityMsg{cmd.Run()} }
 }
+
 func copyText(text string) tea.Cmd {
 	return func() tea.Msg {
 		var cmd *exec.Cmd
@@ -495,8 +503,10 @@ func copyText(text string) tea.Cmd {
 	}
 }
 
-var accent = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
-var muted = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+var (
+	accent = lipgloss.NewStyle().Foreground(lipgloss.Color("75")).Bold(true)
+	muted  = lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+)
 
 func (m *model) View() string {
 	width := max(20, min(m.width-6, 110))

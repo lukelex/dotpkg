@@ -85,7 +85,7 @@ func servicePath(service string) string {
 	return "/systemd/system/" + name
 }
 
-func applyServices(ctx context.Context, plan StagePlan, options Options, system System) error {
+func applyServices(ctx context.Context, plan StagePlan, system System) error {
 	for _, service := range plan.Missing {
 		userService, name := strings.HasPrefix(service, "user:"), strings.TrimPrefix(service, "user:")
 		if err := system.EnableService(ctx, userService, name); err != nil {

@@ -10,12 +10,14 @@ import (
 	"github.com/lukelex/dotpkg/internal/resource"
 )
 
+// PlanChange describes one change in a plan document.
 type PlanChange struct {
 	Action  string   `json:"action"`
 	Item    string   `json:"item"`
 	Reasons []string `json:"reasons,omitempty"`
 }
 
+// PlanStage groups changes within a plan document.
 type PlanStage struct {
 	Name     string       `json:"name"`
 	Declared []string     `json:"declared"`
@@ -38,6 +40,7 @@ type PlanDocument struct {
 	Stages   []PlanStage `json:"stages"`
 }
 
+// NewPlanDocument constructs a document from the planned changes.
 func NewPlanDocument(packagePlan Plan, resourcePlan *resource.Plan, options Options, appImagePlans ...AppImagePlan) PlanDocument {
 	document := PlanDocument{
 		Schema:   "dotpkg.plan",

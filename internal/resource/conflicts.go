@@ -16,6 +16,7 @@ type ConfigConflict struct {
 	observed os.FileInfo
 }
 
+// ConfigConflicts returns conflicts with declared config links.
 func ConfigConflicts(m *manifest.Manifest, s *state.State, options Options) ([]ConfigConflict, error) {
 	var conflicts []ConfigConflict
 	for _, mapping := range declaredMetadata(m, s, options.Profile, "configs") {

@@ -23,6 +23,7 @@ type Manifest struct {
 	Data map[string]any
 }
 
+// Load parses a manifest from disk.
 func Load(path, hostPath string) (*Manifest, error) {
 	base, err := readMap(path)
 	if err != nil {
@@ -578,6 +579,7 @@ type RemoteBundle struct {
 	Paths                            []string
 }
 
+// RemoteBundles returns the declared remote bundles.
 func (m *Manifest) RemoteBundles() []RemoteBundle {
 	var result []RemoteBundle
 	entries, _ := m.Value("resources.remote_bundles").([]any)
@@ -757,6 +759,7 @@ type GitHubSpec struct {
 	Files   []GitHubFile
 }
 
+// GitHub returns a declared GitHub artifact.
 func (m *Manifest) GitHub(name string) (GitHubSpec, bool) {
 	var result GitHubSpec
 	found := false
@@ -800,6 +803,7 @@ func (m *Manifest) GitHub(name string) (GitHubSpec, bool) {
 	return result, found
 }
 
+// GitHubs returns the declared GitHub artifacts.
 func (m *Manifest) GitHubs(paths []string) []GitHubSpec {
 	var result []GitHubSpec
 	seen := make(map[string]struct{})
@@ -871,6 +875,7 @@ func (m *Manifest) AppImages(paths []string) []AppImageSpec {
 	return result
 }
 
+// Source returns the source of a declared item.
 func (m *Manifest) Source() string {
 	if source, ok := m.Data["source"].(string); ok && source != "" {
 		return source
@@ -888,6 +893,7 @@ func (m *Manifest) Digest() string {
 	return hex.EncodeToString(digest[:])
 }
 
+// Value returns a value from the manifest.
 func (m *Manifest) Value(path string) any {
 	var current any = m.Data
 	for _, part := range splitPath(path) {
@@ -903,6 +909,7 @@ func (m *Manifest) Value(path string) any {
 	return current
 }
 
+// PackageNames returns the declared package names.
 func (m *Manifest) PackageNames(path string) []string {
 	mapping, ok := m.Value(path).(map[string]any)
 	if !ok {
@@ -916,19 +923,23 @@ func (m *Manifest) PackageNames(path string) []string {
 	return result
 }
 
+// OptionNames returns the available selection option names.
 func (m *Manifest) OptionNames() []string {
 	return m.PackageNames("profiles.desktop.options")
 }
 
+// OptionPackages returns the packages associated with an option.
 func (m *Manifest) OptionPackages(option string) []string {
 	return m.PackageNames("profiles.desktop.options." + option + ".packages")
 }
 
+// OptionPrompt returns the prompt for a selection option.
 func (m *Manifest) OptionPrompt(option string) (string, bool) {
 	value, ok := m.Value("profiles.desktop.options." + option + ".prompt").(string)
 	return value, ok && value != ""
 }
 
+// OptionDefault returns the default value for a selection option.
 func (m *Manifest) OptionDefault(option string) bool {
 	value := m.Value("profiles.desktop.options." + option + ".default")
 	switch typed := value.(type) {
@@ -941,10 +952,12 @@ func (m *Manifest) OptionDefault(option string) bool {
 	}
 }
 
+// MetadataStrings returns string metadata for a declaration.
 func (m *Manifest) MetadataStrings(path, key string) []string {
 	return metadataStrings(m.Value(path), key)
 }
 
+// ServiceNames returns the declared service names.
 func (m *Manifest) ServiceNames(path, scope string) []string {
 	return serviceNames(m.Value(path), scope)
 }
@@ -1018,6 +1031,7 @@ type ExecutableLinkCollection struct {
 	Prune  bool
 }
 
+// ExecutableLinkCollections returns declared executable-link collections.
 func (m *Manifest) ExecutableLinkCollections(profile string, selections map[string]bool) []ExecutableLinkCollection {
 	resources, ok := m.Data["resources"].(map[string]any)
 	if !ok {
@@ -1194,6 +1208,7 @@ func serviceNames(value any, scope string) []string {
 	return result
 }
 
+// PackageOrigin returns the origin of a declared package.
 func (m *Manifest) PackageOrigin(name string) string {
 	var sources []string
 	var walk func(any)
@@ -1221,6 +1236,7 @@ func (m *Manifest) PackageOrigin(name string) string {
 	return m.Source()
 }
 
+// HasPackage reports whether a package is declared.
 func (m *Manifest) HasPackage(name string) bool {
 	found := false
 	var walk func(any)
@@ -1241,6 +1257,7 @@ func (m *Manifest) HasPackage(name string) bool {
 	return found
 }
 
+// AddPackage adds a package to the manifest.
 func (m *Manifest) AddPackage(target, path, name string) error {
 	contents, err := os.ReadFile(target)
 	if err != nil {

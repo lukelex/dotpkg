@@ -1,3 +1,4 @@
+// Package resource plans and reconciles non-package resources.
 package resource
 
 import (

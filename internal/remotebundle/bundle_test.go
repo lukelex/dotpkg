@@ -17,9 +17,11 @@ import (
 	"github.com/lukelex/dotpkg/internal/state"
 )
 
-const first = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-const second = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-const repository = "mattpocock/skills"
+const (
+	first      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	second     = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	repository = "mattpocock/skills"
+)
 
 func spec(pin string) manifest.RemoteBundle {
 	return manifest.RemoteBundle{Name: "grill-me", Repository: repository, Paths: []string{"skills/grill-me", "skills/grilling", "LICENSE"}, Target: "$HOME/.local/share/dotpkg/opencode-skills", Commit: pin}
@@ -33,7 +35,7 @@ func archive(sha string, invalid string) []byte {
 	_ = w.WriteHeader(&tar.Header{Name: "skills-" + sha + "/AGENTS.md", Typeflag: tar.TypeSymlink, Linkname: "CLAUDE.md"})
 	_ = w.WriteHeader(&tar.Header{Name: "skills-" + sha + "/other.md", Typeflag: tar.TypeLink, Linkname: "skills-" + sha + "/LICENSE"})
 	license := []byte("MIT license for test fixture")
-	_ = w.WriteHeader(&tar.Header{Name: "skills-" + sha + "/LICENSE", Mode: 0644, Size: int64(len(license))})
+	_ = w.WriteHeader(&tar.Header{Name: "skills-" + sha + "/LICENSE", Mode: 0o644, Size: int64(len(license))})
 	_, _ = w.Write(license)
 	for _, skill := range []string{"grill-me", "grilling"} {
 		if invalid == "missing" && skill == "grilling" {
@@ -52,7 +54,7 @@ func archive(sha string, invalid string) []byte {
 			_ = w.WriteHeader(&tar.Header{Name: name, Typeflag: kind, Linkname: "/etc/passwd"})
 			continue
 		}
-		_ = w.WriteHeader(&tar.Header{Name: name, Mode: 0644, Size: int64(len(body))})
+		_ = w.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))})
 		_, _ = w.Write(body)
 	}
 	_ = w.Close()
@@ -178,10 +180,10 @@ func TestConflictAndModifiedClean(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	targetPath := filepath.Join(home, ".local/share/dotpkg/opencode-skills")
-	if err := os.MkdirAll(targetPath, 0755); err != nil {
+	if err := os.MkdirAll(targetPath, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(targetPath, "user.txt"), []byte("owned"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(targetPath, "user.txt"), []byte("owned"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	sys := &System{client: http.DefaultClient}
@@ -201,7 +203,7 @@ func TestCleanPreservesAddedUserFiles(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	current := first
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write(archive(current, ""))
 	}))
 	defer server.Close()
@@ -234,12 +236,12 @@ func TestGenericRequestedFilesAndChangedPaths(t *testing.T) {
 	gz := gzip.NewWriter(&b)
 	tw := tar.NewWriter(gz)
 	for name, body := range map[string]string{"repo-" + first + "/docs/guide.txt": "guide", "repo-" + first + "/config/settings.json": "{}", "repo-" + first + "/ignored.txt": "not installed"} {
-		_ = tw.WriteHeader(&tar.Header{Name: name, Mode: 0644, Size: int64(len(body))})
+		_ = tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))})
 		_, _ = tw.Write([]byte(body))
 	}
 	_ = tw.Close()
 	_ = gz.Close()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(b.Bytes()) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.Write(b.Bytes()) }))
 	defer server.Close()
 	sys := &System{client: server.Client(), archive: server.URL}
 	declaration := manifest.RemoteBundle{Name: "docs", Repository: "example/project", Paths: []string{"docs/guide.txt", "config/settings.json"}, Target: "$HOME/.local/share/dotpkg/docs", Commit: first}
@@ -266,7 +268,7 @@ func TestGenericRequestedFilesAndChangedPaths(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(targetPath, "ignored.txt")); !os.IsNotExist(err) {
 		t.Fatal("installed unrequested file")
 	}
-	if err := os.Mkdir(filepath.Join(targetPath, "user-empty-dir"), 0755); err != nil {
+	if err := os.Mkdir(filepath.Join(targetPath, "user-empty-dir"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := Remove("docs", tracked["docs"]); err == nil {

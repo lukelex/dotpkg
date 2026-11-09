@@ -32,7 +32,7 @@ func TestRemoteBundleDeclaration(t *testing.T) {
 		{"overlapping targets", declaration + "    - name: second\n      repository: example/project\n      paths: [README.md]\n      target: $HOME/.local/share/dotpkg/opencode-skills/child\n", false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if err := os.WriteFile(path, []byte(test.data), 0644); err != nil {
+			if err := os.WriteFile(path, []byte(test.data), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			m, err := Load(path, "")

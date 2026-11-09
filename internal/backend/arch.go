@@ -1,3 +1,4 @@
+// Package backend integrates with system package managers and services.
 package backend
 
 import (
@@ -15,6 +16,7 @@ import (
 	"time"
 )
 
+// Arch implements package and service operations on Arch Linux.
 type Arch struct {
 	HTTPClient    *http.Client
 	Runner        Runner
@@ -33,14 +35,18 @@ type Runner interface {
 	Run(context.Context, string, []string, string) error
 }
 
+// OSRunner executes external commands using the host operating system.
 type OSRunner struct{}
 
+// LookPath finds an executable on the host.
 func (OSRunner) LookPath(name string) (string, error) { return exec.LookPath(name) }
 
+// Output runs a command and returns its output.
 func (OSRunner) Output(ctx context.Context, name string, args []string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).Output()
 }
 
+// Run runs the requested operation.
 func (OSRunner) Run(ctx context.Context, name string, args []string, directory string) error {
 	if os.Getenv("DOTPKG_NONINTERACTIVE") == "1" && name == "sudo" {
 		args = append([]string{"-n"}, args...)
@@ -53,6 +59,7 @@ func (OSRunner) Run(ctx context.Context, name string, args []string, directory s
 	return command.Run()
 }
 
+// NewArch creates a new package-manager backend.
 func NewArch() *Arch {
 	return &Arch{
 		HTTPClient:    &http.Client{Timeout: 30 * time.Second},
@@ -63,6 +70,7 @@ func NewArch() *Arch {
 	}
 }
 
+// Configure sets the package-manager command options.
 func (a *Arch) Configure(options Options) error {
 	if options.HTTPTimeout < 0 {
 		return fmt.Errorf("HTTP timeout cannot be negative")
@@ -85,6 +93,7 @@ func (a *Arch) Configure(options Options) error {
 	return nil
 }
 
+// IsInstalled reports whether a package is installed.
 func (a *Arch) IsInstalled(ctx context.Context, packageName string) (bool, error) {
 	if _, err := a.Runner.LookPath("pacman"); err != nil {
 		return false, fmt.Errorf("pacman is required: %w", err)
@@ -100,6 +109,7 @@ func (a *Arch) IsInstalled(ctx context.Context, packageName string) (bool, error
 	return false, fmt.Errorf("check installed package %s: %w", packageName, err)
 }
 
+// RepositoryPackages returns packages available from system repositories.
 func (a *Arch) RepositoryPackages(ctx context.Context) (map[string]struct{}, error) {
 	if _, err := a.Runner.LookPath("pacman"); err != nil {
 		return nil, fmt.Errorf("pacman is required: %w", err)
@@ -118,6 +128,7 @@ type aurResponse struct {
 	} `json:"results"`
 }
 
+// AURPackages returns packages available from the AUR.
 func (a *Arch) AURPackages(ctx context.Context, names []string) (map[string]struct{}, error) {
 	result := make(map[string]struct{})
 	if len(names) == 0 {
@@ -209,7 +220,8 @@ func (a *Arch) logf(format string, values ...any) {
 	}
 }
 
-func (a *Arch) Install(ctx context.Context, repository, aur []string, profile string) error {
+// Install installs the requested managed item.
+func (a *Arch) Install(ctx context.Context, repository, aur []string, _ string) error {
 	if len(repository) > 0 {
 		if err := a.Runner.Run(ctx, "sudo", append([]string{"pacman", "-S", "--needed", "--noconfirm"}, repository...), ""); err != nil {
 			return fmt.Errorf("install repository packages: %w", err)
@@ -229,6 +241,7 @@ func (a *Arch) Install(ctx context.Context, repository, aur []string, profile st
 	return nil
 }
 
+// Remove removes the requested managed item.
 func (a *Arch) Remove(ctx context.Context, packages []string, profile string) error {
 	if len(packages) == 0 {
 		return nil
@@ -248,6 +261,7 @@ func (a *Arch) Remove(ctx context.Context, packages []string, profile string) er
 	return nil
 }
 
+// CurrentGroups returns the groups of the current user.
 func (a *Arch) CurrentGroups(ctx context.Context, username string) ([]string, error) {
 	output, err := a.Runner.Output(ctx, "id", []string{"-nG", username})
 	if err != nil {
@@ -256,6 +270,7 @@ func (a *Arch) CurrentGroups(ctx context.Context, username string) ([]string, er
 	return strings.Fields(string(output)), nil
 }
 
+// GroupExists reports whether a system group exists.
 func (a *Arch) GroupExists(ctx context.Context, group string) (bool, error) {
 	_, err := a.Runner.Output(ctx, "getent", []string{"group", group})
 	if err == nil {
@@ -267,6 +282,7 @@ func (a *Arch) GroupExists(ctx context.Context, group string) (bool, error) {
 	return false, fmt.Errorf("check group %s: %w", group, err)
 }
 
+// AddToGroup adds the user to a system group.
 func (a *Arch) AddToGroup(ctx context.Context, username, group string) error {
 	if err := a.Runner.Run(ctx, "sudo", []string{"usermod", "-aG", group, username}, ""); err != nil {
 		return fmt.Errorf("add %s to group %s: %w", username, group, err)
@@ -274,6 +290,7 @@ func (a *Arch) AddToGroup(ctx context.Context, username, group string) error {
 	return nil
 }
 
+// RemoveFromGroup removes the user from a system group.
 func (a *Arch) RemoveFromGroup(ctx context.Context, username, group string) error {
 	if err := a.Runner.Run(ctx, "sudo", []string{"gpasswd", "-d", username, group}, ""); err != nil {
 		return fmt.Errorf("remove %s from group %s: %w", username, group, err)
@@ -281,6 +298,7 @@ func (a *Arch) RemoveFromGroup(ctx context.Context, username, group string) erro
 	return nil
 }
 
+// ServiceExists reports whether a service unit exists.
 func (a *Arch) ServiceExists(ctx context.Context, user bool, service string) (bool, error) {
 	args := serviceArgs(user, "cat", service)
 	_, err := a.Runner.Output(ctx, "systemctl", args)
@@ -293,6 +311,7 @@ func (a *Arch) ServiceExists(ctx context.Context, user bool, service string) (bo
 	return false, fmt.Errorf("check service %s: %w", service, err)
 }
 
+// ServiceEnabled reports whether a service unit is enabled.
 func (a *Arch) ServiceEnabled(ctx context.Context, user bool, service string) (bool, error) {
 	args := serviceArgs(user, "is-enabled", "--quiet", service)
 	_, err := a.Runner.Output(ctx, "systemctl", args)
@@ -305,6 +324,7 @@ func (a *Arch) ServiceEnabled(ctx context.Context, user bool, service string) (b
 	return false, fmt.Errorf("check enabled service %s: %w", service, err)
 }
 
+// EnableService enables a service unit.
 func (a *Arch) EnableService(ctx context.Context, user bool, service string) error {
 	if err := a.runSystemctl(ctx, user, "enable", "--now", service); err != nil {
 		return fmt.Errorf("enable service %s: %w", service, err)
@@ -312,6 +332,7 @@ func (a *Arch) EnableService(ctx context.Context, user bool, service string) err
 	return nil
 }
 
+// DisableService disables a service unit.
 func (a *Arch) DisableService(ctx context.Context, user bool, service string) error {
 	if err := a.runSystemctl(ctx, user, "disable", "--now", service); err != nil {
 		return fmt.Errorf("disable service %s: %w", service, err)
@@ -319,6 +340,7 @@ func (a *Arch) DisableService(ctx context.Context, user bool, service string) er
 	return nil
 }
 
+// ReloadServices reloads the service manager configuration.
 func (a *Arch) ReloadServices(ctx context.Context, user bool) error {
 	if err := a.runSystemctl(ctx, user, "daemon-reload"); err != nil {
 		return fmt.Errorf("reload %s services: %w", serviceScope(user), err)
@@ -326,6 +348,7 @@ func (a *Arch) ReloadServices(ctx context.Context, user bool) error {
 	return nil
 }
 
+// RestartService restarts a service unit.
 func (a *Arch) RestartService(ctx context.Context, user bool, service string) error {
 	if err := a.runSystemctl(ctx, user, "try-restart", service); err != nil {
 		return fmt.Errorf("restart service %s: %w", service, err)
@@ -333,11 +356,13 @@ func (a *Arch) RestartService(ctx context.Context, user bool, service string) er
 	return nil
 }
 
+// ServiceActive reports whether a service unit is active.
 func (a *Arch) ServiceActive(ctx context.Context, user bool, service string) (bool, error) {
 	n := nativeResources{Runner: a.Runner}
 	return n.ServiceActive(ctx, user, service)
 }
 
+// ReloadService reloads a service unit.
 func (a *Arch) ReloadService(ctx context.Context, user bool, service string) error {
 	return a.runSystemctl(ctx, user, "reload", service)
 }

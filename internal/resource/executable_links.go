@@ -30,7 +30,7 @@ func executableLinkSources(m *manifest.Manifest, s *state.State, options Options
 			if err != nil {
 				return nil, fmt.Errorf("inspect executable link source %s: %w", entry.Name(), err)
 			}
-			if info.Mode()&0111 == 0 {
+			if info.Mode()&0o111 == 0 {
 				continue
 			}
 			target := filepath.Join(collection.Target, collection.Prefix+entry.Name())

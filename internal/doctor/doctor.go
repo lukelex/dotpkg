@@ -1,3 +1,4 @@
+// Package doctor checks the health of managed packages and resources.
 package doctor
 
 import (
@@ -16,16 +17,19 @@ import (
 	"github.com/lukelex/dotpkg/internal/state"
 )
 
+// Finding describes a health-check result.
 type Finding struct {
 	Severity string `json:"severity"`
 	Check    string `json:"check"`
 	Message  string `json:"message"`
 }
 
+// Report collects the results of a health check.
 type Report struct {
 	Findings []Finding `json:"findings"`
 }
 
+// Errors counts the error-level findings in the report.
 func (r Report) Errors() int {
 	count := 0
 	for _, finding := range r.Findings {
@@ -36,6 +40,7 @@ func (r Report) Errors() int {
 	return count
 }
 
+// Run checks managed resources and returns a health report without changing them.
 func Run(ctx context.Context, m *manifest.Manifest, s *state.State, options reconcile.Options, system backend.Backend) Report {
 	report := Report{}
 	if !s.Exists {

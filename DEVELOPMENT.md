@@ -6,10 +6,18 @@ Run the same checks used before committing:
 
 ```sh
 gofmt -w cmd internal
+go install mvdan.cc/gofumpt@v0.12.0
+"$(go env GOPATH)/bin/gofumpt" -w cmd internal
+go install github.com/mgechev/revive@v1.17.1
+"$(go env GOPATH)/bin/revive" -config revive.toml -set_exit_status ./...
 go test ./...
 go vet ./...
 git diff --check
 ```
+
+CI checks both `gofmt` and `gofumpt` formatting. Revive uses the default rules
+listed in `revive.toml`; `go vet` and `staticcheck` provide broader static
+analysis.
 
 Inspect the CLI with:
 

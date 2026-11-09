@@ -13,6 +13,7 @@ type SelfUpdater interface {
 	UpgradePackage(context.Context, string, string) error
 }
 
+// VerifyExecutable verifies the installed executable.
 func (a *Arch) VerifyExecutable(ctx context.Context, executable, packageName string) error {
 	if _, err := a.Runner.LookPath("pacman"); err != nil {
 		return fmt.Errorf("pacman is required: %w", err)
@@ -27,6 +28,7 @@ func (a *Arch) VerifyExecutable(ctx context.Context, executable, packageName str
 	return nil
 }
 
+// AvailableUpdate checks whether a newer release is available.
 func (a *Arch) AvailableUpdate(ctx context.Context, packageName, origin string, dryRun bool) (string, string, bool, error) {
 	if origin != "repo" && origin != "aur" {
 		return "", "", false, fmt.Errorf("unsupported self-update origin %q", origin)
@@ -93,6 +95,7 @@ func (a *Arch) AvailableUpdate(ctx context.Context, packageName, origin string, 
 	}
 }
 
+// UpgradePackage upgrades the installed package.
 func (a *Arch) UpgradePackage(ctx context.Context, packageName, origin string) error {
 	switch origin {
 	case "repo":

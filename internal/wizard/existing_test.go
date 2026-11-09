@@ -15,7 +15,7 @@ func TestExistingManifestAutoResumeReconcilesEveryRun(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	path := filepath.Join(root, "packages.yaml")
 	contents := "source: repo\ncommon:\n  packages:\n    headless:\n      git: {}\n"
-	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	o := Options{AutoResume: true, Plain: true, Yes: true, Reconcile: reconcile.Options{ManifestPath: path, Profile: "desktop"}}
@@ -37,7 +37,7 @@ func TestExistingManifestAutoResumeReconcilesEveryRun(t *testing.T) {
 	// Substitute the child executable, so this exercises orchestration without
 	// installing/removing anything or querying a live package manager.
 	fake := filepath.Join(root, "fake-dotpkg")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" >> calls\n"), 0700); err != nil {
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nprintf '%s\\n' \"$@\" >> calls\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {

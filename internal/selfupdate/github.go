@@ -19,20 +19,25 @@ import (
 	"time"
 )
 
-const repository = "lukelex/dotpkg"
-const maxBinary = 32 << 20
-const maxChecksums = 64 << 10
+const (
+	repository   = "lukelex/dotpkg"
+	maxBinary    = 32 << 20
+	maxChecksums = 64 << 10
+)
 
+// ReleaseUpdater checks and applies executable updates.
 type ReleaseUpdater interface {
 	Check(context.Context, string, string) (string, bool, error)
 	Install(context.Context, string, string) error
 }
 
+// Client checks and installs pinned dotpkg releases from GitHub.
 type Client struct {
 	HTTP           *http.Client
 	API, Downloads string
 }
 
+// New creates a new instance with default settings.
 func New() *Client {
 	return &Client{
 		HTTP: &http.Client{Timeout: 60 * time.Second, CheckRedirect: func(req *http.Request, _ []*http.Request) error {
@@ -78,6 +83,7 @@ func versionParts(value string) ([3]uint64, error) {
 	return result, nil
 }
 
+// Check checks whether an update is available.
 func (c *Client) Check(ctx context.Context, executable, current string) (string, bool, error) {
 	if _, err := assetName(); err != nil {
 		return "", false, err
@@ -146,7 +152,7 @@ func standalone(ctx context.Context, executable string) error {
 	return nil
 }
 
-func (c *Client) fetch(ctx context.Context, address string, max int64) ([]byte, error) {
+func (c *Client) fetch(ctx context.Context, address string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
 		return nil, err
@@ -160,11 +166,11 @@ func (c *Client) fetch(ctx context.Context, address string, max int64) ([]byte, 
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("GitHub release request failed: %s", response.Status)
 	}
-	data, err := io.ReadAll(io.LimitReader(response.Body, max+1))
+	data, err := io.ReadAll(io.LimitReader(response.Body, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	if int64(len(data)) > max {
+	if int64(len(data)) > limit {
 		return nil, errors.New("GitHub release asset exceeds size limit")
 	}
 	return data, nil
@@ -190,6 +196,7 @@ func checksum(contents []byte, asset string) (string, error) {
 	return digest, nil
 }
 
+// Install installs the requested managed item.
 func (c *Client) Install(ctx context.Context, executable, tag string) error {
 	asset, err := assetName()
 	if err != nil {

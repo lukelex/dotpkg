@@ -17,6 +17,7 @@ func (fakeSystem) IsInstalled(context.Context, string) (bool, error) { return fa
 func (fakeSystem) RepositoryPackages(context.Context) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
+
 func (fakeSystem) AURPackages(context.Context, []string) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
@@ -29,6 +30,7 @@ func (fakeSystem) RemoveFromGroup(context.Context, string, string) error     { r
 func (fakeSystem) ServiceExists(context.Context, bool, string) (bool, error) {
 	return false, nil
 }
+
 func (fakeSystem) ServiceEnabled(context.Context, bool, string) (bool, error) {
 	return false, nil
 }

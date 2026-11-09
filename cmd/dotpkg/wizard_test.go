@@ -28,7 +28,7 @@ func TestWizardWithoutManifestPreviewsStarter(t *testing.T) {
 		t.Fatal("environment manifest silently replaced")
 	}
 	t.Setenv("DOTPKG_MANIFEST", "")
-	if err := os.WriteFile("packages.yaml", []byte("common:\n  packages:\n    headless:\n      git: {}\n"), 0600); err != nil {
+	if err := os.WriteFile("packages.yaml", []byte("common:\n  packages:\n    headless:\n      git: {}\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := wizardCommand(context.Background(), []string{"--dry-run"}); err != nil {

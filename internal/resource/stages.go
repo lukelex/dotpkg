@@ -80,8 +80,8 @@ func resourceStages() []resourceStage {
 				declared := declaredServices(m, s, options.Profile)
 				return StagePlan{Declared: declared, Extra: subtract(s.Items(state.ManagedKey, state.ManagedServices), declared)}, nil
 			},
-			apply: func(ctx context.Context, plan StagePlan, _ *manifest.Manifest, _ *state.State, options Options, system System) error {
-				return applyServices(ctx, plan, options, system)
+			apply: func(ctx context.Context, plan StagePlan, _ *manifest.Manifest, _ *state.State, _ Options, system System) error {
+				return applyServices(ctx, plan, system)
 			},
 			clean: func(ctx context.Context, plan StagePlan, _ *manifest.Manifest, _ *state.State, _ Options, system System) error {
 				return cleanServices(ctx, plan.Extra, system)
@@ -133,6 +133,7 @@ func resourceStages() []resourceStage {
 	}
 }
 
+// Stages returns the resource stages in execution order.
 func (p Plan) Stages() []NamedStage {
 	definitions := resourceStages()
 	stages := make([]NamedStage, 0, len(definitions))

@@ -22,11 +22,13 @@ func (r *updateRunner) LookPath(name string) (string, error) {
 	}
 	return "/usr/bin/" + name, nil
 }
+
 func (r *updateRunner) Output(_ context.Context, name string, args []string) ([]byte, error) {
 	key := name + " " + strings.Join(args, " ")
 	r.calls = append(r.calls, key)
 	return []byte(r.outputs[key]), r.err[key]
 }
+
 func (r *updateRunner) Run(_ context.Context, name string, args []string, _ string) error {
 	key := name + " " + strings.Join(args, " ")
 	r.calls = append(r.calls, key)

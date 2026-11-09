@@ -20,6 +20,7 @@ import (
 	"github.com/lukelex/dotpkg/internal/state"
 )
 
+// Options configures the operation.
 type Options struct {
 	Selections        map[string]bool
 	RequireSelections bool
@@ -45,6 +46,7 @@ type Options struct {
 	OutputFormat      string
 }
 
+// Plan describes the changes needed to reach the declared state.
 type Plan struct {
 	Declared []string
 	Adopted  []string
@@ -52,6 +54,7 @@ type Plan struct {
 	Extra    []string
 }
 
+// AppImagePlan describes AppImage installation and removal changes.
 type AppImagePlan struct {
 	Plan
 	Specs     map[string]appimage.Spec
@@ -60,6 +63,7 @@ type AppImagePlan struct {
 	Previous  map[string]appimage.Record
 }
 
+// GitHubPlan describes GitHub artifact installation and removal changes.
 type GitHubPlan struct {
 	Plan
 	Specs     map[string]githubsource.Spec
@@ -81,8 +85,10 @@ func ConfigDir() string {
 	return filepath.Join(configHome, "dotpkg")
 }
 
+// ConfigManifestPath returns the default manifest path.
 func ConfigManifestPath() string { return filepath.Join(ConfigDir(), "package.yaml") }
 
+// ConfigStatePath returns the default state path.
 func ConfigStatePath() string { return filepath.Join(ConfigDir(), "state.yaml") }
 
 // DefaultManifestPath returns the manifest selected when --manifest is not
@@ -194,6 +200,7 @@ func writeAtomic(path string, contents []byte, mode os.FileMode) error {
 	return os.Rename(temporaryName, path)
 }
 
+// Changes returns the changes in the plan.
 func (p Plan) Changes() int {
 	return len(p.Adopted) + len(p.Missing) + len(p.Extra)
 }
@@ -248,6 +255,7 @@ func (o Options) normalize() (Options, error) {
 	return o, nil
 }
 
+// Load reads the manifest, optional host overlay, and managed state.
 func Load(options Options) (*manifest.Manifest, *state.State, Options, error) {
 	options, err := options.normalize()
 	if err != nil {
@@ -264,6 +272,7 @@ func Load(options Options) (*manifest.Manifest, *state.State, Options, error) {
 	return effective, currentState, options, nil
 }
 
+// EnsureSelections ensures all required selections have values.
 func EnsureSelections(m *manifest.Manifest, s *state.State, options Options) (bool, error) {
 	normalized, err := options.normalize()
 	if err != nil {
@@ -349,6 +358,7 @@ func askSelection(options Options, prompt string, defaultSelected bool) (bool, e
 	return strings.HasPrefix(strings.ToLower(answer), "y"), nil
 }
 
+// PackageCategories returns the declared package categories.
 func PackageCategories(m *manifest.Manifest, profile string, selectedOnly bool, s *state.State) []string {
 	categories := []string{
 		"common.packages.headless",
@@ -386,6 +396,7 @@ func selected(s *state.State, path ...string) bool {
 	return recorded && value
 }
 
+// DeclaredPackages returns the packages declared by the selected profile.
 func DeclaredPackages(m *manifest.Manifest, categories []string) []string {
 	unique := make(map[string]struct{})
 	for _, category := range categories {
@@ -401,6 +412,7 @@ func DeclaredPackages(m *manifest.Manifest, categories []string) []string {
 	return result
 }
 
+// BuildPlan computes the changes needed to reach the declared state.
 func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, profile string, system backend.Backend) (Plan, error) {
 	declared := packageManagerPackages(m, profile, s)
 	tracked := s.Packages()
@@ -451,6 +463,7 @@ func packageManagerPackages(m *manifest.Manifest, profile string, s *state.State
 	return result
 }
 
+// BuildGitHubPlan computes changes for declared GitHub artifacts.
 func BuildGitHubPlan(ctx context.Context, m *manifest.Manifest, s *state.State, profile string, system githubsource.System) (GitHubPlan, error) {
 	paths := PackageCategories(m, profile, true, s)
 	declaredSpecs := m.GitHubs(paths)
@@ -510,6 +523,7 @@ func BuildGitHubPlan(ctx context.Context, m *manifest.Manifest, s *state.State, 
 	return plan, nil
 }
 
+// BuildGitHubCleanPlan computes removal of obsolete GitHub artifacts.
 func BuildGitHubCleanPlan(m *manifest.Manifest, s *state.State, profile string) GitHubPlan {
 	plan := GitHubPlan{Plan: Plan{}, Previous: make(map[string]githubsource.Record)}
 	for _, spec := range m.GitHubs(PackageCategories(m, profile, true, s)) {
@@ -589,6 +603,7 @@ func sameGitHubTarget(previous, declared string) bool {
 	return previousErr == nil && declaredErr == nil && previous == declared
 }
 
+// BuildAppImagePlan computes changes for declared AppImages.
 func BuildAppImagePlan(ctx context.Context, m *manifest.Manifest, s *state.State, profile string, system appimage.System) (AppImagePlan, error) {
 	paths := PackageCategories(m, profile, true, s)
 	declaredSpecs := m.AppImages(paths)
@@ -657,6 +672,7 @@ func BuildAppImagePlan(ctx context.Context, m *manifest.Manifest, s *state.State
 	return plan, nil
 }
 
+// BuildAppImageCleanPlan computes removal of obsolete AppImages.
 func BuildAppImageCleanPlan(m *manifest.Manifest, s *state.State, profile string) AppImagePlan {
 	declared := m.AppImages(PackageCategories(m, profile, true, s))
 	plan := AppImagePlan{
@@ -686,6 +702,7 @@ func BuildAppImageCleanPlan(m *manifest.Manifest, s *state.State, profile string
 	return plan
 }
 
+// Clean removes managed resources no longer declared.
 func Clean(ctx context.Context, options Options, system backend.Backend) error {
 	return WithLock(options, func(normalized Options) error {
 		return cleanLocked(ctx, normalized, system)
@@ -739,6 +756,7 @@ func subtract(values, remove []string) []string {
 	return result
 }
 
+// Validation contains the results of validating the manifest and environment.
 type Validation struct {
 	Packages []string
 	Repo     []string
@@ -746,6 +764,7 @@ type Validation struct {
 	Missing  []string
 }
 
+// Validate checks the manifest and selected resources.
 func Validate(ctx context.Context, m *manifest.Manifest, profile string, extra []string, system backend.Backend) (Validation, error) {
 	packages := DeclaredPackages(m, PackageCategories(m, profile, false, nil))
 	packages = append(packages, extra...)

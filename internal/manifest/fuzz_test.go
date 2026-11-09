@@ -1,3 +1,4 @@
+// Package manifest parses and updates package and resource declarations.
 package manifest
 
 import (

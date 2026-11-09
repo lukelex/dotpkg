@@ -6,14 +6,17 @@ import (
 	"strings"
 )
 
+// Fedora implements package operations on Fedora-based systems.
 type Fedora struct {
 	nativeResources
 }
 
+// NewFedora creates a new package-manager backend.
 func NewFedora() *Fedora {
 	return &Fedora{nativeResources: nativeResources{Runner: OSRunner{}}}
 }
 
+// IsInstalled reports whether a package is installed.
 func (f *Fedora) IsInstalled(ctx context.Context, packageName string) (bool, error) {
 	if _, err := f.Runner.LookPath("rpm"); err != nil {
 		return false, fmt.Errorf("rpm is required: %w", err)
@@ -28,6 +31,7 @@ func (f *Fedora) IsInstalled(ctx context.Context, packageName string) (bool, err
 	return false, fmt.Errorf("check installed package %s: %w", packageName, err)
 }
 
+// RepositoryPackages returns packages available from system repositories.
 func (f *Fedora) RepositoryPackages(ctx context.Context) (map[string]struct{}, error) {
 	if _, err := f.Runner.LookPath("dnf"); err != nil {
 		return nil, fmt.Errorf("dnf is required: %w", err)
@@ -39,6 +43,7 @@ func (f *Fedora) RepositoryPackages(ctx context.Context) (map[string]struct{}, e
 	return linesToSet(string(output)), nil
 }
 
+// AURPackages rejects AUR queries because Fedora does not support the AUR.
 func (f *Fedora) AURPackages(_ context.Context, names []string) (map[string]struct{}, error) {
 	if len(names) == 0 {
 		return map[string]struct{}{}, nil
@@ -46,6 +51,7 @@ func (f *Fedora) AURPackages(_ context.Context, names []string) (map[string]stru
 	return nil, fmt.Errorf("AUR packages are unsupported by the Fedora backend: %s", strings.Join(names, ", "))
 }
 
+// Install installs the requested managed item.
 func (f *Fedora) Install(ctx context.Context, repository, aur []string, _ string) error {
 	if len(aur) > 0 {
 		return fmt.Errorf("cannot install AUR packages with the Fedora backend: %s", strings.Join(aur, ", "))
@@ -59,6 +65,7 @@ func (f *Fedora) Install(ctx context.Context, repository, aur []string, _ string
 	return nil
 }
 
+// Remove removes the requested managed item.
 func (f *Fedora) Remove(ctx context.Context, packages []string, _ string) error {
 	if len(packages) == 0 {
 		return nil

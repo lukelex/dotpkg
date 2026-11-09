@@ -1,3 +1,4 @@
+// Package main provides the dotpkg command-line interface.
 package main
 
 import (

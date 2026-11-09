@@ -21,11 +21,13 @@ import (
 	"time"
 )
 
+// File describes a file supplied by a release.
 type File struct {
 	Source string
 	Target string
 }
 
+// Spec describes the pinned GitHub archive and files to install.
 type Spec struct {
 	Name    string
 	Repo    string
@@ -35,6 +37,7 @@ type Spec struct {
 	Files   []File
 }
 
+// Artifact describes an artifact supplied by a release.
 type Artifact struct {
 	Address string
 	Repo    string
@@ -43,12 +46,14 @@ type Artifact struct {
 	Sha256  string
 }
 
+// InstalledFile describes a file installed on the host.
 type InstalledFile struct {
 	Source string
 	Target string
 	Digest string
 }
 
+// Record describes a managed installation.
 type Record struct {
 	Name    string
 	Repo    string
@@ -58,6 +63,7 @@ type Record struct {
 	Files   []InstalledFile
 }
 
+// System is the interface reconciliation uses to manage GitHub artifacts.
 type System interface {
 	Resolve(context.Context, Spec) (Artifact, error)
 	Installed(context.Context, Record) (bool, error)
@@ -65,12 +71,14 @@ type System interface {
 	Remove(context.Context, Record) error
 }
 
+// Client resolves and manages downloadable artifacts.
 type Client struct {
 	HTTP       *http.Client
 	HomeDir    string
 	GitHubBase string
 }
 
+// New creates a new instance with default settings.
 func New() *Client {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -79,6 +87,7 @@ func New() *Client {
 	return &Client{HTTP: &http.Client{Timeout: 30 * time.Second}, HomeDir: home, GitHubBase: "https://github.com"}
 }
 
+// Resolve resolves the release metadata for an artifact.
 func (c *Client) Resolve(_ context.Context, spec Spec) (Artifact, error) {
 	if err := validateSpec(spec); err != nil {
 		return Artifact{}, err
@@ -96,6 +105,7 @@ func (c *Client) Resolve(_ context.Context, spec Spec) (Artifact, error) {
 	return Artifact{Address: address, Repo: spec.Repo, Ref: spec.Ref, Archive: spec.Archive, Sha256: strings.ToLower(spec.Sha256)}, nil
 }
 
+// Installed reports whether the artifact is installed.
 func (c *Client) Installed(_ context.Context, record Record) (bool, error) {
 	if err := validateRecord(record); err != nil {
 		return false, err
@@ -125,6 +135,7 @@ func (c *Client) Installed(_ context.Context, record Record) (bool, error) {
 	return true, nil
 }
 
+// Install installs the requested managed item.
 func (c *Client) Install(ctx context.Context, spec Spec, artifact Artifact, previous *Record) (Record, error) {
 	if err := validateSpec(spec); err != nil {
 		return Record{}, err
@@ -191,6 +202,7 @@ func (c *Client) Install(ctx context.Context, spec Spec, artifact Artifact, prev
 	return record, nil
 }
 
+// Remove removes the requested managed item.
 func (c *Client) Remove(ctx context.Context, record Record) error {
 	present, err := c.Installed(ctx, record)
 	if err != nil {
@@ -432,7 +444,8 @@ func selectEntries(entries map[string]archiveEntry, requested []File) (map[strin
 		return nil, errors.New("archive must contain one top-level directory")
 	}
 	var root string
-	for root = range roots {
+	for name := range roots {
+		root = name
 	}
 	result := make(map[string]archiveEntry, len(requested))
 	for _, mapping := range requested {

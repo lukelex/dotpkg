@@ -97,7 +97,7 @@ func TestResolveRejectsMalformedPinnedDigest(t *testing.T) {
 func TestInstallVerifiesAndRemovesAppImage(t *testing.T) {
 	contents := []byte("fake AppImage")
 	digest := sha256.Sum256(contents)
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.Write(contents)
 	}))
 	defer server.Close()

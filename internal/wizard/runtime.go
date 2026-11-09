@@ -16,6 +16,7 @@ import (
 	"github.com/lukelex/dotpkg/internal/reconcile"
 )
 
+// Options configures the operation.
 type Options struct {
 	Bootstrap      bool
 	AutoResume     bool
@@ -27,6 +28,7 @@ type Options struct {
 	SelectionsPath string
 }
 
+// Session tracks a running wizard workflow.
 type Session struct {
 	Profile    string            `json:"profile"`
 	Host       string            `json:"host"`
@@ -56,7 +58,7 @@ func atomicJSON(path string, value any) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".wizard-*")
@@ -197,12 +199,12 @@ func (r *runtime) begin() error {
 	if err := r.save(); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(r.directory, "run.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	f, err := os.OpenFile(filepath.Join(r.directory, "run.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
 	r.log = f
-	r.events, err = os.OpenFile(filepath.Join(r.directory, "events.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	r.events, err = os.OpenFile(filepath.Join(r.directory, "events.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return err
 	}
@@ -225,7 +227,7 @@ func (r *runtime) handoff(step Step) (*exec.Cmd, error) {
 	if step.LogOutput {
 		if script, err := exec.LookPath("script"); err == nil {
 			path := filepath.Join(r.directory, step.ID+".log")
-			file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+			file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 			if err != nil {
 				return nil, err
 			}
@@ -281,7 +283,7 @@ func (r *runtime) continuation(enable bool) error {
 	if strings.ContainsAny(r.executable+r.options.Reconcile.ManifestPath+r.options.Reconcile.RootPath+r.options.Reconcile.StatePath, "\n\r") {
 		return fmt.Errorf("cannot register continuation with newline in path")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".dotpkg-*")

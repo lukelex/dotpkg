@@ -153,7 +153,7 @@ func TestArchAURPackagesBatchesRequests(t *testing.T) {
 
 func TestArchAURPackagesRetriesTransientFailures(t *testing.T) {
 	attempts := 0
-	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+	client := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		attempts++
 		if attempts < 2 {
 			return &http.Response{

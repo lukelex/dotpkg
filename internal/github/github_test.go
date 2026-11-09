@@ -61,7 +61,7 @@ func TestInstallUpdateAndRemovePinnedSourceArchive(t *testing.T) {
 
 func TestInstallRejectsChecksumTraversalAndSymlinks(t *testing.T) {
 	archive := tarGzip(t, map[string]tarFile{"root/bin/tool": {contents: []byte("tool"), mode: 0o755}})
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) { _, _ = writer.Write(archive) }))
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { _, _ = writer.Write(archive) }))
 	defer server.Close()
 	client := New()
 	client.HomeDir = t.TempDir()
@@ -123,7 +123,7 @@ func TestReadTarRejectsGenuinelyMultipleRoots(t *testing.T) {
 func TestInstallRefusesUnmanagedAndModifiedTargets(t *testing.T) {
 	archive := tarGzip(t, map[string]tarFile{"root/bin/tool": {contents: []byte("one"), mode: 0o755}})
 	home := t.TempDir()
-	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) { _, _ = writer.Write(archive) }))
+	server := httptest.NewTLSServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) { _, _ = writer.Write(archive) }))
 	defer server.Close()
 	client := New()
 	client.HomeDir, client.HTTP = home, server.Client()

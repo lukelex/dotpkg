@@ -17,6 +17,7 @@ import (
 	"github.com/lukelex/dotpkg/internal/state"
 )
 
+// System provides the operations required to manage resources.
 type System interface {
 	CurrentGroups(context.Context, string) ([]string, error)
 	GroupExists(context.Context, string) (bool, error)
@@ -30,6 +31,7 @@ type System interface {
 	DisableService(context.Context, bool, string) error
 }
 
+// Options configures the operation.
 type Options struct {
 	Profile             string
 	RootPath            string
@@ -47,6 +49,7 @@ type Options struct {
 	NonInteractive      bool
 }
 
+// StagePlan describes changes in one resource stage.
 type StagePlan struct {
 	Declared []string
 	Adopted  []string
@@ -54,6 +57,7 @@ type StagePlan struct {
 	Extra    []string
 }
 
+// ConfigStatus describes the current state of a managed config.
 type ConfigStatus struct {
 	Source       string
 	Target       string
@@ -63,10 +67,12 @@ type ConfigStatus struct {
 	Matches      bool
 }
 
+// Changes returns the changes in the plan.
 func (p StagePlan) Changes() int {
 	return len(p.Adopted) + len(p.Missing) + len(p.Extra)
 }
 
+// Plan describes the changes needed to reach the declared state.
 type Plan struct {
 	Groups          StagePlan
 	Configs         StagePlan
@@ -78,6 +84,7 @@ type Plan struct {
 
 var errConfigConflict = errors.New("config target conflict")
 
+// Changes returns the changes in the plan.
 func (p Plan) Changes() int {
 	changes := len(p.ServiceActions)
 	for _, stage := range p.Stages() {
@@ -86,6 +93,7 @@ func (p Plan) Changes() int {
 	return changes
 }
 
+// BuildPlan computes the changes needed to reach the declared state.
 func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (Plan, error) {
 	options = normalize(options, m)
 	var plan Plan
@@ -112,6 +120,7 @@ func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, option
 	return plan, nil
 }
 
+// CleanPlan computes removal of obsolete managed resources.
 func CleanPlan(m *manifest.Manifest, s *state.State, options Options) (Plan, error) {
 	options = normalize(options, m)
 	var plan Plan
@@ -155,6 +164,7 @@ func InspectConfig(mapping string, options Options) (ConfigStatus, error) {
 	return status, nil
 }
 
+// Sync applies the planned changes to the host.
 func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) error {
 	options = normalize(options, m)
 	tracker := options.ServiceTracker

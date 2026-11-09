@@ -11,6 +11,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Spec describes the steps in a wizard workflow.
 type Spec struct {
 	Version         int     `yaml:"version"`
 	Title           string  `yaml:"title"`
@@ -20,6 +21,7 @@ type Spec struct {
 	Steps           []Step  `yaml:"steps"`
 }
 
+// Input describes a value requested by the wizard.
 type Input struct {
 	ID             string   `yaml:"id"`
 	Title          string   `yaml:"title"`
@@ -29,6 +31,7 @@ type Input struct {
 	Choices        []string `yaml:"choices"`
 }
 
+// Step describes one wizard workflow step.
 type Step struct {
 	ID               string   `yaml:"id"`
 	Title            string   `yaml:"title"`
@@ -52,6 +55,7 @@ type Step struct {
 
 var identifier = regexp.MustCompile(`^[a-z][a-z0-9_\-]*$`)
 
+// Load parses and validates the onboarding workflow in the manifest.
 func Load(m *manifest.Manifest) (Spec, error) {
 	value, ok := m.Data["onboarding"]
 	if !ok {
@@ -109,9 +113,11 @@ func Load(m *manifest.Manifest) (Spec, error) {
 // Reconciliation inspects installed packages and managed state on every run;
 // no saved wizard success flag can skip a subsequent package transaction.
 func packageWorkflow() Spec {
-	action := []string{"${binary}", "sync", "--manifest", "${manifest}",
+	action := []string{
+		"${binary}", "sync", "--manifest", "${manifest}",
 		"--state-file", "${state}", "--profile", "${profile}", "--host", "${host}",
-		"--root", "${root}", "--selections", "${selections}", "--require-selections", "--yes"}
+		"--root", "${root}", "--selections", "${selections}", "--require-selections", "--yes",
+	}
 	return Spec{
 		Version: 1, Title: "Reconcile this machine's packages",
 		Description: "Review the existing manifest and package choices. Reconciliation checks installed packages and managed state each time.",
@@ -123,6 +129,7 @@ func packageWorkflow() Spec {
 	}
 }
 
+// ForProfile returns the workflow for a selected profile.
 func (s Spec) ForProfile(profile string, packagesOnly bool) []Step {
 	var steps []Step
 	for _, step := range s.Steps {

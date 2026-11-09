@@ -25,18 +25,24 @@ import (
 	"github.com/lukelex/dotpkg/internal/state"
 )
 
-const markerName = ".dotpkg-bundle.json"
-const maxArchive = 16 << 20
-const maxExtracted = 8 << 20
+const (
+	markerName   = ".dotpkg-bundle.json"
+	maxArchive   = 16 << 20
+	maxExtracted = 8 << 20
+)
 
-var shaPattern = regexp.MustCompile(`^[a-f0-9]{40}$`)
-var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+var (
+	shaPattern    = regexp.MustCompile(`^[a-f0-9]{40}$`)
+	digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+)
 
+// System fetches and manages pinned remote bundles.
 type System struct {
 	client       *http.Client
 	api, archive string
 }
 
+// New creates a new instance with default settings.
 func New() *System {
 	return &System{client: &http.Client{Timeout: 20 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if req.URL.Scheme != "https" || (req.URL.Hostname() != "api.github.com" && req.URL.Hostname() != "codeload.github.com") {
@@ -49,14 +55,20 @@ func New() *System {
 	}}, api: "https://api.github.com", archive: "https://codeload.github.com"}
 }
 
+// Record describes a managed installation.
 type Record struct{ Repository, Target, Commit string }
+
+// Change describes an installation or removal.
 type Change struct{ Name, Action, Old, New string }
+
+// Plan describes the changes needed to reach the declared state.
 type Plan struct {
 	Changes  []Change
 	Specs    map[string]manifest.RemoteBundle
 	Previous map[string]state.RemoteBundle
 }
 
+// Count returns the number of planned changes.
 func (p Plan) Count() int { return len(p.Changes) }
 
 func target(spec manifest.RemoteBundle) (string, error) {
@@ -279,6 +291,7 @@ func samePaths(a, b []string) bool {
 	return true
 }
 
+// Build computes the changes needed for a remote bundle.
 func (s *System) Build(ctx context.Context, specs []manifest.RemoteBundle, tracked map[string]state.RemoteBundle) (Plan, error) {
 	p := Plan{Specs: map[string]manifest.RemoteBundle{}, Previous: tracked}
 	for _, spec := range specs {
@@ -313,6 +326,7 @@ func (s *System) Build(ctx context.Context, specs []manifest.RemoteBundle, track
 	return p, nil
 }
 
+// CleanPlan computes removal of obsolete managed resources.
 func CleanPlan(specs []manifest.RemoteBundle, tracked map[string]state.RemoteBundle) Plan {
 	p := Plan{Specs: map[string]manifest.RemoteBundle{}, Previous: tracked}
 	for _, spec := range specs {
@@ -488,6 +502,7 @@ func (s *System) Install(ctx context.Context, spec manifest.RemoteBundle, previo
 	return nil
 }
 
+// Remove removes the requested managed item.
 func Remove(name string, record state.RemoteBundle) error {
 	if len(record.Paths) == 0 || len(record.Paths) > 20 || !regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*/[a-zA-Z0-9][a-zA-Z0-9_.-]*$`).MatchString(record.Repository) || !shaPattern.MatchString(record.Commit) {
 		return fmt.Errorf("refusing to clean invalid bundle state %s", name)

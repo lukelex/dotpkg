@@ -1,3 +1,4 @@
+// Package recovery stores crash-recovery journals for package transactions.
 package recovery
 
 import (
@@ -9,14 +10,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// CurrentVersion is the current on-disk format version.
 const CurrentVersion = 1
 
+// Packages records managed package names and their origins.
 type Packages struct {
 	Repository []string `yaml:"repository,omitempty" json:"repository,omitempty"`
 	AUR        []string `yaml:"aur,omitempty" json:"aur,omitempty"`
 	Unknown    []string `yaml:"unknown,omitempty" json:"unknown,omitempty"`
 }
 
+// AppImage records a managed AppImage installation.
 type AppImage struct {
 	Name      string `yaml:"name" json:"name"`
 	Address   string `yaml:"address" json:"address"`
@@ -26,17 +30,20 @@ type AppImage struct {
 	Version   string `yaml:"version,omitempty" json:"version,omitempty"`
 }
 
+// AppImages records managed AppImage installations.
 type AppImages struct {
 	Installed []AppImage `yaml:"installed,omitempty" json:"installed,omitempty"`
 	Removed   []AppImage `yaml:"removed,omitempty" json:"removed,omitempty"`
 }
 
+// GitHubFile records a file installed from a GitHub release.
 type GitHubFile struct {
 	Source string `yaml:"source" json:"source"`
 	Target string `yaml:"target" json:"target"`
 	Digest string `yaml:"digest" json:"digest"`
 }
 
+// GitHubArtifact records a managed GitHub release artifact.
 type GitHubArtifact struct {
 	Name    string       `yaml:"name" json:"name"`
 	Repo    string       `yaml:"repo" json:"repo"`
@@ -46,11 +53,13 @@ type GitHubArtifact struct {
 	Files   []GitHubFile `yaml:"files" json:"files"`
 }
 
+// GitHubArtifacts records managed GitHub release artifacts.
 type GitHubArtifacts struct {
 	Installed []GitHubArtifact `yaml:"installed,omitempty" json:"installed,omitempty"`
 	Removed   []GitHubArtifact `yaml:"removed,omitempty" json:"removed,omitempty"`
 }
 
+// Journal stores the information needed to recover an interrupted transaction.
 type Journal struct {
 	Version   int             `yaml:"version" json:"version"`
 	StartedAt string          `yaml:"started_at" json:"started_at"`
@@ -63,8 +72,10 @@ type Journal struct {
 	GitHub    GitHubArtifacts `yaml:"github,omitempty" json:"github,omitempty"`
 }
 
+// Path returns the path to the recovery journal.
 func Path(statePath string) string { return statePath + ".journal.yaml" }
 
+// New creates a new instance with default settings.
 func New(statePath, profile string, installed, removed Packages) Journal {
 	return Journal{
 		Version:   CurrentVersion,
@@ -76,6 +87,7 @@ func New(statePath, profile string, installed, removed Packages) Journal {
 	}
 }
 
+// Load reads the persisted data from disk.
 func Load(statePath string) (Journal, error) {
 	contents, err := os.ReadFile(Path(statePath))
 	if os.IsNotExist(err) {
@@ -126,6 +138,7 @@ func (j Journal) Write() error {
 	return nil
 }
 
+// Clear removes the completed recovery journal.
 func Clear(statePath string) error {
 	if err := os.Remove(Path(statePath)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove recovery journal: %w", err)

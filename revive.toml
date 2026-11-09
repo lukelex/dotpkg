@@ -1,0 +1,27 @@
+# Pin Revive's default rules explicitly so the same checks run locally and in CI.
+enableAllRules = false
+confidence = 0.8
+
+[rule.var-declaration]
+[rule.package-comments]
+[rule.dot-imports]
+[rule.blank-imports]
+[rule.exported]
+[rule.var-naming]
+[rule.indent-error-flow]
+[rule.range]
+[rule.errorf]
+[rule.error-naming]
+[rule.error-strings]
+[rule.receiver-naming]
+[rule.increment-decrement]
+[rule.error-return]
+[rule.unexported-return]
+[rule.time-naming]
+[rule.context-keys-type]
+[rule.context-as-argument]
+[rule.empty-block]
+[rule.superfluous-else]
+[rule.unused-parameter]
+[rule.unreachable-code]
+[rule.redefines-builtin-id]

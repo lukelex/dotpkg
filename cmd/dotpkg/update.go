@@ -16,10 +16,12 @@ import (
 	"github.com/lukelex/dotpkg/internal/selfupdate"
 )
 
-var updateHostname = os.Hostname
-var updateExecutable = os.Executable
-var updateInput io.Reader = os.Stdin
-var githubUpdater selfupdate.ReleaseUpdater = selfupdate.New()
+var (
+	updateHostname                             = os.Hostname
+	updateExecutable                           = os.Executable
+	updateInput      io.Reader                 = os.Stdin
+	githubUpdater    selfupdate.ReleaseUpdater = selfupdate.New()
+)
 
 func updateCommand(ctx context.Context, args []string, system backend.Backend) error {
 	set := flag.NewFlagSet("update", flag.ContinueOnError)

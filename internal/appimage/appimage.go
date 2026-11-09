@@ -1,3 +1,4 @@
+// Package appimage resolves and installs pinned AppImage releases.
 package appimage
 
 import (
@@ -63,6 +64,7 @@ type Client struct {
 	GitHubAPIBase string
 }
 
+// New creates a new instance with default settings.
 func New() *Client {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -75,6 +77,7 @@ func New() *Client {
 	}
 }
 
+// Resolve resolves the release metadata for an artifact.
 func (c *Client) Resolve(ctx context.Context, spec Spec) (Artifact, error) {
 	u, err := parseAddress(spec.Address)
 	if err != nil {
@@ -128,6 +131,7 @@ func (c *Client) Resolve(ctx context.Context, spec Spec) (Artifact, error) {
 	return Artifact{}, fmt.Errorf("no verifiable AppImage digest for %s; expected a GitHub release digest, .sha256 sidecar, or .zsync metadata", spec.Name)
 }
 
+// Installed reports whether the artifact is installed.
 func (c *Client) Installed(_ context.Context, record Record) (bool, error) {
 	if err := c.validateTarget(record.Target); err != nil {
 		return false, err
@@ -147,10 +151,12 @@ func (c *Client) Installed(_ context.Context, record Record) (bool, error) {
 	return digest == record.Digest, nil
 }
 
+// Target returns the installation target for an artifact.
 func (c *Client) Target(spec Spec) (string, error) {
 	return c.target(spec)
 }
 
+// Install installs the requested managed item.
 func (c *Client) Install(ctx context.Context, spec Spec, artifact Artifact) (Record, error) {
 	address, err := parseAddress(artifact.Address)
 	if err != nil {
@@ -212,6 +218,7 @@ func (c *Client) Install(ctx context.Context, spec Spec, artifact Artifact) (Rec
 	}, nil
 }
 
+// Remove removes the requested managed item.
 func (c *Client) Remove(ctx context.Context, record Record) error {
 	if err := c.validateTarget(record.Target); err != nil {
 		return err

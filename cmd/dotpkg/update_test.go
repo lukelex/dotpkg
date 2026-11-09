@@ -20,10 +20,12 @@ func (f *updateFakeBackend) VerifyExecutable(_ context.Context, path, pkg string
 	f.verified = path + ":" + pkg
 	return f.verifyErr
 }
-func (f *updateFakeBackend) AvailableUpdate(_ context.Context, pkg, origin string, dry bool) (string, string, bool, error) {
+
+func (f *updateFakeBackend) AvailableUpdate(_ context.Context, _, _ string, dry bool) (string, string, bool, error) {
 	f.dry = dry
 	return "1", "2", f.newer, nil
 }
+
 func (f *updateFakeBackend) UpgradePackage(_ context.Context, pkg, origin string) error {
 	f.upgraded = pkg + ":" + origin
 	return nil

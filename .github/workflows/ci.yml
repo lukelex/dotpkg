@@ -20,6 +20,14 @@ jobs:
           go-version: "1.26.10"
       - name: Check Go formatting
         run: test -z "$(gofmt -l cmd internal)"
+      - name: Check gofumpt formatting
+        run: |
+          go install mvdan.cc/gofumpt@v0.12.0
+          test -z "$("$(go env GOPATH)/bin/gofumpt" -l cmd internal)"
+      - name: Lint readability
+        run: |
+          go install github.com/mgechev/revive@v1.17.1
+          "$(go env GOPATH)/bin/revive" -config revive.toml -set_exit_status ./...
       - name: Check shell syntax
         run: |
           set -Eeuo pipefail

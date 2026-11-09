@@ -9,7 +9,7 @@ import (
 func TestConflictBackupPreservesContentsAndRejectsChangedTarget(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "config")
-	if err := os.WriteFile(target, []byte("personal config"), 0600); err != nil {
+	if err := os.WriteFile(target, []byte("personal config"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	info, _ := os.Lstat(target)
@@ -22,7 +22,7 @@ func TestConflictBackupPreservesContentsAndRejectsChangedTarget(t *testing.T) {
 	if err != nil || string(data) != "personal config" {
 		t.Fatalf("backup=%q error=%v", data, err)
 	}
-	if err := os.WriteFile(target, []byte("new config"), 0600); err != nil {
+	if err := os.WriteFile(target, []byte("new config"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := conflict.Backup(); err == nil {

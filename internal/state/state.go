@@ -10,6 +10,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// State holds the persisted ownership and selection of managed resources.
 type State struct {
 	Path     string
 	Exists   bool
@@ -17,6 +18,7 @@ type State struct {
 	Data     map[string]any
 }
 
+// AppImage records a managed AppImage installation.
 type AppImage struct {
 	Address   string
 	Target    string
@@ -25,17 +27,20 @@ type AppImage struct {
 	Version   string
 }
 
+// RemoteBundle records an installed remote bundle.
 type RemoteBundle struct {
 	Repository, Target, Commit string
 	Paths                      []string
 }
 
+// GitHubFile records a file installed from a GitHub release.
 type GitHubFile struct {
 	Source string
 	Target string
 	Digest string
 }
 
+// GitHubArtifact records a managed GitHub release artifact.
 type GitHubArtifact struct {
 	Repo    string
 	Ref     string
@@ -45,19 +50,41 @@ type GitHubArtifact struct {
 }
 
 const (
+	// CurrentVersion is the current on-disk format version.
 	CurrentVersion = 1
 
-	ManagedKey             = "managed"
-	ManagedPackages        = "packages"
-	ManagedPackageOrigins  = "package_origins"
-	ManagedAppImages       = "appimages"
+	// ManagedKey identifies the managed-resource section of the state file.
+	ManagedKey = "managed"
+
+	// ManagedPackages identifies the state field for managed packages.
+	ManagedPackages = "packages"
+
+	// ManagedPackageOrigins identifies the state field for package origins.
+	ManagedPackageOrigins = "package_origins"
+
+	// ManagedAppImages identifies the state field for AppImage installations.
+	ManagedAppImages = "appimages"
+
+	// ManagedGitHubArtifacts identifies the state field for GitHub artifacts.
 	ManagedGitHubArtifacts = "github"
-	ManagedGroups          = "groups"
-	ManagedConfigs         = "configs"
-	ManagedServices        = "services"
+
+	// ManagedGroups identifies the state field for managed groups.
+	ManagedGroups = "groups"
+
+	// ManagedConfigs identifies the state field for managed configs.
+	ManagedConfigs = "configs"
+
+	// ManagedServices identifies the state field for managed services.
+	ManagedServices = "services"
+
+	// ManagedExecutableLinks identifies the state field for executable links.
 	ManagedExecutableLinks = "executable_links"
-	ManagedDirectories     = "directories"
-	ManagedRemoteBundles   = "remote_bundles"
+
+	// ManagedDirectories identifies the state field for managed directories.
+	ManagedDirectories = "directories"
+
+	// ManagedRemoteBundles identifies the state field for remote bundles.
+	ManagedRemoteBundles = "remote_bundles"
 )
 
 var managedListKeys = []string{
@@ -69,10 +96,12 @@ var managedListKeys = []string{
 	ManagedDirectories,
 }
 
+// New creates a new instance with default settings.
 func New(path string) *State {
 	return &State{Path: path, Data: defaultData()}
 }
 
+// Load reads the persisted data from disk.
 func Load(path string) (*State, error) {
 	contents, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
@@ -332,6 +361,7 @@ func defaultData() map[string]any {
 	}
 }
 
+// RemoteBundles returns the declared remote bundles.
 func (s *State) RemoteBundles() map[string]RemoteBundle {
 	result := map[string]RemoteBundle{}
 	entries, _ := s.Data["managed"].(map[string]any)["remote_bundles"].(map[string]any)
@@ -346,6 +376,7 @@ func (s *State) RemoteBundles() map[string]RemoteBundle {
 	return result
 }
 
+// SetRemoteBundles updates the recorded remote bundles.
 func (s *State) SetRemoteBundles(bundles map[string]RemoteBundle) {
 	entries := map[string]any{}
 	for name, bundle := range bundles {
@@ -358,6 +389,7 @@ func (s *State) SetRemoteBundles(bundles map[string]RemoteBundle) {
 	s.Set(entries, "managed", "remote_bundles")
 }
 
+// Get returns the managed items for a profile.
 func (s *State) Get(path ...string) (any, bool) {
 	var current any = s.Data
 	for _, part := range path {
@@ -373,6 +405,7 @@ func (s *State) Get(path ...string) (any, bool) {
 	return current, true
 }
 
+// Set updates the managed items for a profile.
 func (s *State) Set(value any, path ...string) {
 	if len(path) == 0 {
 		return
@@ -389,20 +422,24 @@ func (s *State) Set(value any, path ...string) {
 	mapping[path[len(path)-1]] = value
 }
 
+// Selection returns the saved selections for a profile.
 func (s *State) Selection(path ...string) (bool, bool) {
 	value, ok := s.Get(append([]string{"current", "selections"}, path...)...)
 	selected, isBool := value.(bool)
 	return selected, ok && isBool
 }
 
+// Packages returns the managed packages for a profile.
 func (s *State) Packages() []string {
 	return s.Items(ManagedKey, ManagedPackages)
 }
 
+// SetPackages updates the managed packages for a profile.
 func (s *State) SetPackages(packages []string) {
 	s.SetItems(packages, ManagedKey, ManagedPackages)
 }
 
+// PackageOrigins returns the recorded package origins.
 func (s *State) PackageOrigins() map[string]string {
 	value, ok := s.Get(ManagedKey, ManagedPackageOrigins)
 	if !ok {
@@ -421,6 +458,7 @@ func (s *State) PackageOrigins() map[string]string {
 	return result
 }
 
+// SetPackageOrigins updates the recorded package origins.
 func (s *State) SetPackageOrigins(origins map[string]string) {
 	values := make(map[string]any, len(origins))
 	for packageName, origin := range origins {
@@ -431,6 +469,7 @@ func (s *State) SetPackageOrigins(origins map[string]string) {
 	s.Set(values, ManagedKey, ManagedPackageOrigins)
 }
 
+// AppImages returns the recorded AppImage installations.
 func (s *State) AppImages() map[string]AppImage {
 	value, ok := s.Get(ManagedKey, ManagedAppImages)
 	if !ok {
@@ -457,6 +496,7 @@ func (s *State) AppImages() map[string]AppImage {
 	return result
 }
 
+// SetAppImages updates the recorded AppImage installations.
 func (s *State) SetAppImages(images map[string]AppImage) {
 	values := make(map[string]any, len(images))
 	for name, image := range images {
@@ -477,6 +517,7 @@ func (s *State) SetAppImages(images map[string]AppImage) {
 	s.Set(values, ManagedKey, ManagedAppImages)
 }
 
+// GitHubArtifacts returns the recorded GitHub artifacts.
 func (s *State) GitHubArtifacts() map[string]GitHubArtifact {
 	value, ok := s.Get(ManagedKey, ManagedGitHubArtifacts)
 	if !ok {
@@ -514,6 +555,7 @@ func (s *State) GitHubArtifacts() map[string]GitHubArtifact {
 	return result
 }
 
+// SetGitHubArtifacts updates the recorded GitHub artifacts.
 func (s *State) SetGitHubArtifacts(artifacts map[string]GitHubArtifact) {
 	values := make(map[string]any, len(artifacts))
 	for name, artifact := range artifacts {
@@ -539,6 +581,7 @@ func items(value any) []any {
 	return items
 }
 
+// Items returns the recorded managed resources.
 func (s *State) Items(path ...string) []string {
 	value, ok := s.Get(path...)
 	if !ok {
@@ -558,6 +601,7 @@ func (s *State) Items(path ...string) []string {
 	return result
 }
 
+// SetItems updates the recorded managed resources.
 func (s *State) SetItems(items []string, path ...string) {
 	unique := make(map[string]struct{}, len(items))
 	for _, item := range items {
@@ -608,6 +652,7 @@ func (s *State) Write() error {
 	return nil
 }
 
+// Snapshot captures the current state for rollback.
 func (s *State) Snapshot() (map[string]any, error) {
 	contents, err := yaml.Marshal(s.Data)
 	if err != nil {
@@ -620,6 +665,7 @@ func (s *State) Snapshot() (map[string]any, error) {
 	return snapshot, nil
 }
 
+// Restore restores state from a snapshot.
 func (s *State) Restore(snapshot map[string]any) {
 	s.Data = snapshot
 }

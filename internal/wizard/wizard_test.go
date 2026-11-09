@@ -20,7 +20,7 @@ func fixture(t *testing.T, body string) Options {
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
 	path := filepath.Join(root, "packages.yaml")
-	if err := os.WriteFile(path, []byte("onboarding:\n  version: 1\n  title: Test installer\n"+body), 0600); err != nil {
+	if err := os.WriteFile(path, []byte("onboarding:\n  version: 1\n  title: Test installer\n"+body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return Options{Reconcile: reconcile.Options{ManifestPath: path, RootPath: root, Profile: "server", StatePath: filepath.Join(root, "packages-state.yaml")}}

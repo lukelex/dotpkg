@@ -17,6 +17,7 @@ type SelectionChoice struct {
 	Recorded bool     `json:"recorded"`
 }
 
+// SelectionChoices returns the available package selection choices.
 func SelectionChoices(m *manifest.Manifest, s *state.State, profile string) []SelectionChoice {
 	if profile != "desktop" {
 		return nil

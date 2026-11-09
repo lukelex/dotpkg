@@ -1,3 +1,4 @@
+// Package reconcile plans and applies changes to managed resources.
 package reconcile
 
 import (
@@ -87,20 +88,20 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 	}
 	if len(packagePlan.Extra) > 0 {
 		if err := system.Remove(ctx, packagePlan.Extra, options.Profile); err != nil {
-			return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
+			return packageFailure(ctx, err, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
 	}
 	if len(appImagePlan.Extra) > 0 {
 		for _, name := range appImagePlan.Extra {
 			if err := appSystem.Remove(ctx, appImagePlan.Previous[name]); err != nil {
-				return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
+				return packageFailure(ctx, err, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 			}
 		}
 	}
 	if len(githubPlan.Extra) > 0 {
 		for _, name := range githubPlan.Extra {
 			if err := githubSystem.Remove(ctx, githubPlan.Previous[name]); err != nil {
-				return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
+				return packageFailure(ctx, err, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 			}
 		}
 	}
@@ -130,7 +131,7 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 	if len(packagePlan.Extra) > 0 || len(appImagePlan.Extra) > 0 || len(githubPlan.Extra) > 0 {
 		setCurrentState(s, m, options)
 		if err := s.Write(); err != nil {
-			return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
+			return packageFailure(ctx, err, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 		}
 	}
 	if resourcePlan != nil && resourcePlan.Changes() > 0 {
@@ -141,7 +142,7 @@ func cleanLocked(ctx context.Context, options Options, system backend.Backend) e
 		setCurrentState(s, m, options)
 		if err := resource.Clean(ctx, m, s, resource.Options{Profile: options.Profile, RootPath: options.RootPath, Output: options.Output}, resourceSystem); err != nil {
 			if len(packagePlan.Extra) > 0 || len(appImagePlan.Extra) > 0 || len(githubPlan.Extra) > 0 {
-				return packageFailure(err, ctx, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
+				return packageFailure(ctx, err, system, appSystem, githubSystem, journal, s, oldState, oldPackages, oldOrigins)
 			}
 			return err
 		}

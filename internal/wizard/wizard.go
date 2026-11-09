@@ -18,8 +18,10 @@ import (
 	"github.com/lukelex/dotpkg/internal/resource"
 )
 
+// ErrIncomplete indicates an unfinished wizard workflow.
 var ErrIncomplete = errors.New("setup remains unfinished; rerun the wizard to continue")
 
+// Run runs the requested operation.
 func Run(ctx context.Context, options Options) error {
 	r, choices, err := prepare(options)
 	if err != nil {
@@ -37,10 +39,10 @@ func Run(ctx context.Context, options Options) error {
 		return fmt.Errorf("wizard requires a terminal; use --plain --yes with explicit selections and inputs, or --dry-run")
 	}
 	// Prevent two login/manual wizards racing on session state and system work.
-	if err := os.MkdirAll(r.directory, 0700); err != nil {
+	if err := os.MkdirAll(r.directory, 0o700); err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(filepath.Join(r.directory, "lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(filepath.Join(r.directory, "lock"), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return err
 	}
