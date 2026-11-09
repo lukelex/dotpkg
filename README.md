@@ -232,8 +232,14 @@ completion Generate Bash, Zsh, or Fish completion
 version    Print the executable version
 ```
 
+`dotpkg --version` and `dotpkg -v` also print the executable version;
+`dotpkg --help` displays it alongside the command reference.
+
 Use `--output json` with `plan`, `diff`, `sync`, or `clean` for a unified,
-versioned plan document. The schema is [plan-v1.json](schema/plan-v1.json) and
+versioned plan document. For guided installation, use `dotpkg wizard` with a
+manifest-defined onboarding workflow; see [guided installation](docs/onboarding.md).
+Explicit package choices are accepted by `sync --selections PATH --require-selections`.
+The plan schema is [plan-v1.json](schema/plan-v1.json) and
 covers package, AppImage, GitHub artifact, remote-bundle, group, config,
 executable-link, directory, and service actions. `doctor --output json`
 provides a machine-readable diagnostic report.

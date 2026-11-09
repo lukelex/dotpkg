@@ -43,7 +43,7 @@ func run(ctx context.Context, args []string) error {
 		usage(os.Stdout)
 		return nil
 	}
-	if args[0] == "version" {
+	if args[0] == "version" || args[0] == "--version" || args[0] == "-v" {
 		fmt.Println(version)
 		return nil
 	}
@@ -52,6 +52,9 @@ func run(ctx context.Context, args []string) error {
 	}
 	if args[0] == "init" {
 		return initCommand(args[1:])
+	}
+	if args[0] == "wizard" {
+		return wizardCommand(ctx, args[1:])
 	}
 	system, err := backend.New()
 	if err != nil {
@@ -82,9 +85,11 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage(output *os.File) {
+	fmt.Fprintf(output, "dotpkg %s\n\n", version)
 	fmt.Fprintln(output, `Usage: dotpkg COMMAND [options]
 
 Commands:
+  wizard    Guided full-screen installation and onboarding.
   init      Create the per-user manifest and state in ~/.config/dotpkg.
   validate  Validate manifest packages against Arch repositories and the AUR.
   plan      Show package changes without modifying the system.
@@ -105,6 +110,8 @@ Common options:
   --profile NAME     desktop or server (default: desktop)
   --dry-run          Print changes without applying them
   --yes              Skip confirmation prompts
+  --selections PATH  Explicit package choices as a JSON object (sync/plan)
+  --require-selections Reject unanswered package choices (sync/plan)
   --resources        Also reconcile groups, config links, and services
   --root PATH        Dotfiles root for resource paths
   --replace          Replace conflicting config targets
@@ -115,6 +122,7 @@ Common options:
   --aur-retries N   Number of AUR request attempts (default: 3)
   --aur-retry-delay DURATION Initial AUR retry delay (default: 100ms)
   --verbose         Log retry and operational diagnostics
+  --version, -v     Print the version
   --help             Show this help`)
 }
 
@@ -251,6 +259,10 @@ func sync(ctx context.Context, args []string, system backend.Backend, planOnly b
 	set.SetOutput(os.Stderr)
 	var common commonFlags
 	common.register(set)
+	var selectionPath string
+	var requireSelections bool
+	set.StringVar(&selectionPath, "selections", "", "JSON object of explicit package choices")
+	set.BoolVar(&requireSelections, "require-selections", false, "reject unresolved package choices")
 	if err := set.Parse(args); err != nil {
 		return err
 	}
@@ -266,7 +278,18 @@ func sync(ctx context.Context, args []string, system backend.Backend, planOnly b
 	if planOnly {
 		common.dryRun = true
 	}
-	return reconcile.Sync(ctx, common.options(), system)
+	options := common.options()
+	options.RequireSelections = requireSelections
+	if selectionPath != "" {
+		contents, err := os.ReadFile(selectionPath)
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(contents, &options.Selections); err != nil {
+			return fmt.Errorf("read selections: %w", err)
+		}
+	}
+	return reconcile.Sync(ctx, options, system)
 }
 
 func cleanCommand(ctx context.Context, args []string, system backend.Backend) error {
@@ -340,8 +363,8 @@ func completion(args []string) error {
 const bashCompletion = `# bash completion for dotpkg
 _dotpkg_complete() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-	local commands="init validate plan diff sync update clean recover add doctor completion version"
-  local options="--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help"
+	local commands="init wizard validate plan diff sync update clean recover add doctor completion version --help --version -v"
+  local options="--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help --version -v"
   if [[ ${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
   else
@@ -353,7 +376,7 @@ complete -F _dotpkg_complete dotpkg
 
 const zshCompletion = `#compdef dotpkg
 _dotpkg() {
-  _arguments '1:command:(init validate plan diff sync update clean recover add doctor completion version)' '*:option:(--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help)'
+  _arguments '1:command:(init wizard validate plan diff sync update clean recover add doctor completion version)' '*:option:(--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help --version -v --selections --require-selections --plain --resume --packages-only)'
 }
 _dotpkg "$@"
 `
@@ -364,6 +387,7 @@ complete -c dotpkg -l host -r
 complete -c dotpkg -l state-file -r
 complete -c dotpkg -l profile -r -a 'desktop server'
 complete -c dotpkg -l dry-run -l check -l yes -l resources -l replace -l restart-services -l verbose
+complete -c dotpkg -l version -s v
 complete -c dotpkg -l root -r
 complete -c dotpkg -l output -r -a 'text json'
 complete -c dotpkg -l timeout -r

@@ -51,6 +51,50 @@ func TestInitCommandCreatesUserConfiguration(t *testing.T) {
 	}
 }
 
+func TestVersionAndHelp(t *testing.T) {
+	for _, test := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"version"}, version + "\n"},
+		{[]string{"--version"}, version + "\n"},
+		{[]string{"-v"}, version + "\n"},
+		{[]string{"--help"}, "dotpkg " + version + "\n\nUsage: dotpkg"},
+		{[]string{"-h"}, "dotpkg " + version + "\n\nUsage: dotpkg"},
+		{nil, "dotpkg " + version + "\n\nUsage: dotpkg"},
+	} {
+		t.Run(strings.Join(test.args, " "), func(t *testing.T) {
+			reader, writer, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer reader.Close()
+			defer writer.Close()
+			original := os.Stdout
+			os.Stdout = writer
+			defer func() { os.Stdout = original }()
+
+			if err := run(context.Background(), test.args); err != nil {
+				t.Fatal(err)
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			output, err := io.ReadAll(reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(test.args) == 0 || test.args[0] == "--help" || test.args[0] == "-h" {
+				if !strings.HasPrefix(string(output), test.want) || !strings.Contains(string(output), "--version, -v") {
+					t.Fatalf("help output = %q, want version and version options", output)
+				}
+			} else if string(output) != test.want {
+				t.Fatalf("output = %q, want %q", output, test.want)
+			}
+		})
+	}
+}
+
 func TestChooseScopePromptsAndAcceptsExplicitScope(t *testing.T) {
 	var output strings.Builder
 	options := reconcile.Options{

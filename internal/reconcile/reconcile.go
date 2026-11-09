@@ -21,24 +21,26 @@ import (
 )
 
 type Options struct {
-	ManifestPath    string
-	HostPath        string
-	HostLabel       string
-	StatePath       string
-	Profile         string
-	DryRun          bool
-	Yes             bool
-	Resources       bool
-	RootPath        string
-	Replace         bool
-	RestartServices bool
-	ResourceSystem  resource.System
-	AppImageSystem  appimage.System
-	GitHubSystem    githubsource.System
-	RemoteSystem    *remotebundle.System
-	Input           io.Reader
-	Output          io.Writer
-	OutputFormat    string
+	Selections        map[string]bool
+	RequireSelections bool
+	ManifestPath      string
+	HostPath          string
+	HostLabel         string
+	StatePath         string
+	Profile           string
+	DryRun            bool
+	Yes               bool
+	Resources         bool
+	RootPath          string
+	Replace           bool
+	RestartServices   bool
+	ResourceSystem    resource.System
+	AppImageSystem    appimage.System
+	GitHubSystem      githubsource.System
+	RemoteSystem      *remotebundle.System
+	Input             io.Reader
+	Output            io.Writer
+	OutputFormat      string
 }
 
 type Plan struct {
@@ -262,10 +264,13 @@ func EnsureSelections(m *manifest.Manifest, s *state.State, options Options) (bo
 		return false, err
 	}
 	options = normalized
-	if options.Profile == "server" {
-		return false, nil
+	changed, err := applySelections(m, s, options)
+	if err != nil {
+		return false, err
 	}
-	changed := false
+	if options.Profile == "server" {
+		return changed, nil
+	}
 	selections := []struct {
 		name  string
 		label string

@@ -42,6 +42,9 @@ func (OSRunner) Output(ctx context.Context, name string, args []string) ([]byte,
 }
 
 func (OSRunner) Run(ctx context.Context, name string, args []string, directory string) error {
+	if os.Getenv("DOTPKG_NONINTERACTIVE") == "1" && name == "sudo" {
+		args = append([]string{"-n"}, args...)
+	}
 	command := exec.CommandContext(ctx, name, args...)
 	command.Dir = directory
 	command.Stdin = os.Stdin
