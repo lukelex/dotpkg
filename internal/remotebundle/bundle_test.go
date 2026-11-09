@@ -63,7 +63,7 @@ func TestRevisionsRollbackAndOwnership(t *testing.T) {
 	downloads := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if offline {
-			http.Error(w, "offline", 503)
+			http.Error(w, "offline", http.StatusServiceUnavailable)
 			return
 		}
 		switch {

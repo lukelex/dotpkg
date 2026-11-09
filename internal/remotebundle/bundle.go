@@ -384,7 +384,7 @@ func (s *System) stage(ctx context.Context, spec manifest.RemoteBundle, parent s
 			continue
 		}
 		found[selected] = true
-		if header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
+		if header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != 0 { // 0 is the legacy regular-file type.
 			return "", fmt.Errorf("unsupported archive entry: %s", name)
 		}
 		rel := path.Base(spec.Paths[selected]) + strings.TrimPrefix(member, spec.Paths[selected])

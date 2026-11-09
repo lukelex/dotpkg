@@ -147,3 +147,25 @@ func TestStateAppImagesRoundTrip(t *testing.T) {
 		t.Fatalf("AppImages = %#v", loaded.AppImages())
 	}
 }
+
+func TestStateGitHubArtifactsRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.yaml")
+	s := New(path)
+	s.SetGitHubArtifacts(map[string]GitHubArtifact{
+		"hunk": {
+			Repo: "lukelex/hunk", Ref: "0123456789abcdef", Archive: "source", Sha256: strings.Repeat("a", 64),
+			Files: []GitHubFile{{Source: "bin/hunk-pager", Target: "/home/test/.local/bin/hunk-pager", Digest: strings.Repeat("b", 64)}},
+		},
+	})
+	if err := s.Write(); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifact := loaded.GitHubArtifacts()["hunk"]
+	if artifact.Ref != "0123456789abcdef" || len(artifact.Files) != 1 || artifact.Files[0].Digest != strings.Repeat("b", 64) {
+		t.Fatalf("GitHub artifacts = %#v", loaded.GitHubArtifacts())
+	}
+}

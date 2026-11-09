@@ -8,6 +8,7 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/appimage"
 	"github.com/lukelex/dotpkg/internal/backend"
+	githubsource "github.com/lukelex/dotpkg/internal/github"
 	"github.com/lukelex/dotpkg/internal/manifest"
 	"github.com/lukelex/dotpkg/internal/reconcile"
 	"github.com/lukelex/dotpkg/internal/remotebundle"
@@ -67,6 +68,21 @@ func Run(ctx context.Context, m *manifest.Manifest, s *state.State, options reco
 			report.add("warning", "appimages", fmt.Sprintf("managed AppImage is no longer declared: %s", name))
 		}
 	}
+	githubSystem := options.GitHubSystem
+	if githubSystem == nil {
+		githubSystem = githubsource.New()
+	}
+	githubPlan, err := reconcile.BuildGitHubPlan(ctx, m, s, options.Profile, githubSystem)
+	if err != nil {
+		report.add("error", "github", err.Error())
+	} else {
+		for _, name := range githubPlan.Missing {
+			report.add("error", "github", fmt.Sprintf("declared GitHub artifact is missing or stale: %s", name))
+		}
+		for _, name := range githubPlan.Extra {
+			report.add("warning", "github", fmt.Sprintf("managed GitHub artifact is no longer declared: %s", name))
+		}
+	}
 
 	validation, err := reconcile.Validate(ctx, m, options.Profile, nil, system)
 	if err != nil {
@@ -95,7 +111,7 @@ func Run(ctx context.Context, m *manifest.Manifest, s *state.State, options reco
 
 	resourceSystem, ok := system.(resource.System)
 	if !ok {
-		report.add("warning", "resources", "backend does not provide group, config, or service diagnostics")
+		report.add("warning", "resources", "backend does not provide group, config, service, executable-link, or directory diagnostics")
 		return report.sorted()
 	}
 	resourceOptions := resource.Options{
@@ -143,6 +159,18 @@ func Run(ctx context.Context, m *manifest.Manifest, s *state.State, options reco
 	}
 	for _, service := range resourcePlan.Services.Extra {
 		report.add("warning", "services", fmt.Sprintf("managed service is no longer declared: %s", service))
+	}
+	for _, target := range resourcePlan.ExecutableLinks.Missing {
+		report.add("error", "executable_links", fmt.Sprintf("executable link is missing or conflicts with the manifest link: %s", target))
+	}
+	for _, target := range resourcePlan.ExecutableLinks.Extra {
+		report.add("warning", "executable_links", fmt.Sprintf("managed executable link is no longer declared: %s", target))
+	}
+	for _, directory := range resourcePlan.Directories.Missing {
+		report.add("error", "directories", fmt.Sprintf("declared directory is missing: %s", directory))
+	}
+	for _, directory := range resourcePlan.Directories.Extra {
+		report.add("warning", "directories", fmt.Sprintf("managed directory is no longer declared: %s", directory))
 	}
 	return report.sorted()
 }

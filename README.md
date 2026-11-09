@@ -42,7 +42,7 @@ provisioning workflows without requiring the full dotfiles repository.
 
 The standalone command owns package reconciliation by default. With
 `--resources`, it can also reconcile the explicitly declared groups,
-configuration links, and systemd services used by the dotfiles integration.
+configuration links, executable links, directories, and systemd services used by the dotfiles integration.
 Those resource operations are safety-checked and tracked in shared state, but
 dotpkg does not attempt to manage arbitrary files, shell configuration, or
 unrelated dotfiles resources. Existing manifest metadata that belongs to other
@@ -94,7 +94,7 @@ Releases provide libc-independent static binaries for `linux/amd64` and
 `linux/arm64`. Download a pinned release and verify it before installing:
 
 ```sh
-version=v0.10.0
+version=v0.14.1
 curl --fail --location --remote-name \
   "https://github.com/lukelex/dotpkg/releases/download/${version}/dotpkg-linux-amd64"
 curl --fail --location --remote-name \
@@ -161,12 +161,37 @@ profiles:
           i3:
 ```
 
-Package metadata can declare `source: repo|aur|appimage`, group membership, config
+Package metadata can declare `source: repo|aur|appimage|github`, group membership, config
 links, and services. AppImage nodes use `source: appimage` with an HTTPS
 `address`; their integrity metadata is resolved automatically. A host file supplied with `--host PATH` is deep-merged
 over the manifest. Use `--manifest PATH` or `DOTPKG_MANIFEST=PATH` to select
 the manifest; resource paths resolve relative to its directory unless
 `--root PATH` is supplied.
+
+GitHub artifacts install only explicitly mapped regular files from a pinned
+source archive or release asset. They require a SHA-256 checksum, never run
+repository build scripts, and can target only paths below `$HOME`:
+
+```yaml
+hunk:
+  source: github
+  repo: lukelex/hunk
+  ref: 0123456789abcdef0123456789abcdef01234567
+  archive: source
+  sha256: <64-character-sha256>
+  files:
+    - source: bin/hunk-pager
+      target: $HOME/.local/bin/hunk-pager
+    - source: bin/git-hunk
+      target: $HOME/.local/bin/git-hunk
+```
+
+`archive: source` downloads `https://github.com/<repo>/archive/<ref>.tar.gz`.
+Any other `archive` value is treated as a release-asset file name for the
+pinned ref. Floating refs such as `main` and `latest`, archive path traversal,
+symlinks, unsafe targets, and checksum mismatches are rejected. Installed files
+and their content digests are tracked in state; `sync`, `clean`, and `recover`
+remove only unmodified files owned by dotpkg.
 
 ## CLI and automation
 
@@ -189,8 +214,9 @@ version    Print the executable version
 
 Use `--output json` with `plan`, `diff`, `sync`, or `clean` for a unified,
 versioned plan document. The schema is [plan-v1.json](schema/plan-v1.json) and
-covers package, AppImage, remote-bundle, group, config, and service actions.
-`doctor --output json` provides a machine-readable diagnostic report.
+covers package, AppImage, GitHub artifact, remote-bundle, group, config,
+executable-link, directory, and service actions. `doctor --output json`
+provides a machine-readable diagnostic report.
 
 Common operational flags include `--dry-run`/`--check`, `--yes`,
 `--profile desktop|server`, `--resources`, `--replace`,
@@ -201,8 +227,9 @@ recorded as managed.
 ## Resources and safety
 
 Resource reconciliation is opt-in with `--resources` and covers declared
-Unix groups, configuration links, systemd services, and remote bundles.
-Groups, links, and services can be declared independently or attached to packages:
+Unix groups, configuration links, executable links, directories, systemd
+services, and remote bundles. Resources can be declared independently or
+attached to packages:
 
 ```yaml
 resources:
@@ -216,6 +243,17 @@ resources:
       scope: user
       profiles: [desktop]
       selections: [i3]
+  executable_links:
+    - source: linux/scripts
+      target: /usr/local/bin
+      prefix: u_
+      prune: true
+  directories:
+    - $HOME/.ssh
+    - $HOME/projects
+    - $HOME/screenshots
+    - $HOME/.local/share/applications
+    - $HOME/backup_vim
 ```
 
 Remote bundles copy only declared files or directories from a GitHub repository.
@@ -257,6 +295,14 @@ adopted, even with `--replace`; `clean --resources` removes only stale, intact
 bundles recorded as managed. Sync repairs tracked content drift; clean preserves
 modified bundles and reports a conflict. Without `--resources` (including the dotfiles `--packages-only`
 wrapper), package operations do not query or modify remote bundles.
+
+An `executable_links` collection links executable files directly inside
+`source` into `target`. `prefix` is optional and defaults to an empty string;
+`prune: true` removes stale dangling symlinks matching the collection prefix.
+
+Directory resources create user directories with mode `0755`. Existing
+directories are adopted, and `clean` removes only empty directories previously
+managed by dotpkg. Paths may use `$HOME`, `$XDG_CONFIG_HOME`, or a leading `~/`.
 
 Config sources must remain inside the configured root, targets are restricted
 to approved home/XDG locations, and broken or escaping symlinks are rejected.

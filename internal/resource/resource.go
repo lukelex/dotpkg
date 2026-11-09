@@ -65,50 +65,47 @@ func (p StagePlan) Changes() int {
 }
 
 type Plan struct {
-	Groups   StagePlan
-	Configs  StagePlan
-	Services StagePlan
+	Groups          StagePlan
+	Configs         StagePlan
+	Services        StagePlan
+	ExecutableLinks StagePlan
+	Directories     StagePlan
 }
 
 var errConfigConflict = errors.New("config target conflict")
 
 func (p Plan) Changes() int {
-	return p.Groups.Changes() + p.Configs.Changes() + p.Services.Changes()
+	changes := 0
+	for _, stage := range p.Stages() {
+		changes += stage.Plan.Changes()
+	}
+	return changes
 }
 
 func BuildPlan(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (Plan, error) {
 	options = normalize(options, m)
-	groups, err := planGroups(ctx, m, s, options, system)
-	if err != nil {
-		return Plan{}, err
+	var plan Plan
+	for _, stage := range resourceStages() {
+		planned, err := stage.build(ctx, m, s, options, system)
+		if err != nil {
+			return Plan{}, err
+		}
+		*stage.plan(&plan) = planned
 	}
-	configs, err := planConfigs(m, s, options)
-	if err != nil {
-		return Plan{}, err
-	}
-	services, err := planServices(ctx, m, s, options, system, true)
-	if err != nil {
-		return Plan{}, err
-	}
-	return Plan{Groups: groups, Configs: configs, Services: services}, nil
+	return plan, nil
 }
 
-func CleanPlan(m *manifest.Manifest, s *state.State, options Options) Plan {
+func CleanPlan(m *manifest.Manifest, s *state.State, options Options) (Plan, error) {
 	options = normalize(options, m)
-	return Plan{
-		Groups: StagePlan{
-			Declared: declaredMetadata(m, s, options.Profile, "groups"),
-			Extra:    subtract(s.Items("managed", "groups"), declaredMetadata(m, s, options.Profile, "groups")),
-		},
-		Configs: StagePlan{
-			Declared: declaredMetadata(m, s, options.Profile, "configs"),
-			Extra:    subtract(s.Items("managed", "configs"), declaredMetadata(m, s, options.Profile, "configs")),
-		},
-		Services: StagePlan{
-			Declared: declaredServices(m, s, options.Profile),
-			Extra:    subtract(s.Items("managed", "services"), declaredServices(m, s, options.Profile)),
-		},
+	var plan Plan
+	for _, stage := range resourceStages() {
+		planned, err := stage.cleanPlan(m, s, options)
+		if err != nil {
+			return Plan{}, err
+		}
+		*stage.plan(&plan) = planned
 	}
+	return plan, nil
 }
 
 // InspectConfig reports the filesystem state of a declared config mapping
@@ -159,20 +156,14 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 		reader = bufio.NewReader(options.Input)
 	}
 	options.Input = reader
-	stages := []struct {
-		name  string
-		plan  StagePlan
-		apply func(StagePlan) error
-		path  []string
-	}{
-		{name: "groups", plan: plan.Groups, apply: func(p StagePlan) error { return applyGroups(ctx, p, options, system) }, path: []string{"managed", "groups"}},
-		{name: "configs", plan: plan.Configs, apply: func(p StagePlan) error { return applyConfigs(p, options) }, path: []string{"managed", "configs"}},
-		{name: "services", plan: plan.Services, apply: func(p StagePlan) error { return applyServices(ctx, p, options, system) }, path: []string{"managed", "services"}},
+	stages := make([]plannedResourceStage, 0, len(resourceStages()))
+	for _, definition := range resourceStages() {
+		stages = append(stages, plannedResourceStage{definition: definition, plan: *definition.plan(&plan)})
 	}
 	for index := range stages {
 		stage := &stages[index]
 		if stage.plan.Changes() == 0 {
-			if stage.name == "configs" && !options.DryRun {
+			if stage.definition.name == "configs" && !options.DryRun {
 				if err := refreshServicesAfterConfigs(ctx, stages, m, s, plan.Configs.Declared, options, system); err != nil {
 					return err
 				}
@@ -180,12 +171,12 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 			continue
 		}
 		if !options.Yes {
-			apply, err := ask(options, "Apply "+stage.name+" changes? [y/N] ")
+			apply, err := ask(options, "Apply "+stage.definition.name+" changes? [y/N] ")
 			if err != nil {
 				return err
 			}
 			if !apply {
-				if stage.name == "configs" {
+				if stage.definition.name == "configs" {
 					if err := refreshServicePlan(ctx, stages, m, s, options, system); err != nil {
 						return err
 					}
@@ -193,20 +184,20 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 				continue
 			}
 		}
-		if err := stage.apply(stage.plan); err != nil {
+		if err := stage.definition.apply(ctx, stage.plan, m, s, options, system); err != nil {
 			return err
 		}
-		items := append([]string{}, s.Items(stage.path...)...)
+		items := append([]string{}, s.Items(state.ManagedKey, stage.definition.stateKey)...)
 		items = subtract(items, stage.plan.Extra)
 		items = append(items, stage.plan.Adopted...)
 		items = append(items, stage.plan.Missing...)
-		if stage.name == "configs" {
+		if stage.definition.name == "configs" {
 			items = matchingConfigs(stage.plan.Declared, options)
 			if err := refreshServicesAfterConfigs(ctx, stages, m, s, plan.Configs.Declared, options, system); err != nil {
 				return err
 			}
 		}
-		s.SetItems(items, stage.path...)
+		s.SetItems(items, state.ManagedKey, stage.definition.stateKey)
 	}
 	return s.Write()
 }
@@ -215,70 +206,21 @@ func Sync(ctx context.Context, m *manifest.Manifest, s *state.State, options Opt
 // declared. It never installs, enables, adopts, or replaces anything.
 func Clean(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) error {
 	options = normalize(options, m)
-	plan := CleanPlan(m, s, options)
-	groups := plan.Groups.Extra
-	configs := plan.Configs.Extra
-	services := plan.Services.Extra
-
-	if len(groups) > 0 {
-		currentGroups, err := system.CurrentGroups(ctx, options.User)
-		if err != nil {
-			return err
-		}
-		for _, group := range groups {
-			if !contains(currentGroups, group) {
-				continue
-			}
-			if err := system.RemoveFromGroup(ctx, options.User, group); err != nil {
-				return err
-			}
-		}
+	plan, err := CleanPlan(m, s, options)
+	if err != nil {
+		return err
 	}
-	for _, mapping := range configs {
-		source, target, err := configPaths(mapping, options)
-		if err != nil {
+	for _, stage := range resourceStages() {
+		stagePlan := stage.plan(&plan)
+		if err := stage.clean(ctx, *stagePlan, m, s, options, system); err != nil {
 			return err
 		}
-		matches, err := configMatches(target, source)
-		if err != nil {
-			return err
-		}
-		if matches {
-			if err := os.Remove(target); err != nil {
-				return fmt.Errorf("remove config link %s: %w", target, err)
-			}
-		}
+		s.SetItems(subtract(s.Items(state.ManagedKey, stage.stateKey), stagePlan.Extra), state.ManagedKey, stage.stateKey)
 	}
-	if len(configs) > 0 {
-		if err := reloadForDeclaredConfigs(ctx, configs, options, system); err != nil {
-			return err
-		}
-	}
-	for _, service := range services {
-		userService := strings.HasPrefix(service, "user:")
-		exists, err := system.ServiceExists(ctx, userService, strings.TrimPrefix(service, "user:"))
-		if err != nil {
-			return err
-		}
-		if !exists {
-			continue
-		}
-		if err := system.DisableService(ctx, userService, strings.TrimPrefix(service, "user:")); err != nil {
-			return err
-		}
-	}
-	s.SetItems(subtract(s.Items("managed", "groups"), groups), "managed", "groups")
-	s.SetItems(subtract(s.Items("managed", "configs"), configs), "managed", "configs")
-	s.SetItems(subtract(s.Items("managed", "services"), services), "managed", "services")
 	return s.Write()
 }
 
-func refreshServicesAfterConfigs(ctx context.Context, stages []struct {
-	name  string
-	plan  StagePlan
-	apply func(StagePlan) error
-	path  []string
-}, m *manifest.Manifest, s *state.State, declared []string, options Options, system System) error {
+func refreshServicesAfterConfigs(ctx context.Context, stages []plannedResourceStage, m *manifest.Manifest, s *state.State, declared []string, options Options, system System) error {
 	if err := reloadForDeclaredConfigs(ctx, declared, options, system); err != nil {
 		return err
 	}
@@ -288,7 +230,11 @@ func refreshServicesAfterConfigs(ctx context.Context, stages []struct {
 	if !options.RestartServices {
 		return nil
 	}
-	for _, service := range stages[2].plan.Declared {
+	services, err := findPlannedStage(stages, "services")
+	if err != nil {
+		return err
+	}
+	for _, service := range services.plan.Declared {
 		if !configMatchesService(declared, service, options) {
 			continue
 		}
@@ -300,17 +246,16 @@ func refreshServicesAfterConfigs(ctx context.Context, stages []struct {
 	return nil
 }
 
-func refreshServicePlan(ctx context.Context, stages []struct {
-	name  string
-	plan  StagePlan
-	apply func(StagePlan) error
-	path  []string
-}, m *manifest.Manifest, s *state.State, options Options, system System) error {
+func refreshServicePlan(ctx context.Context, stages []plannedResourceStage, m *manifest.Manifest, s *state.State, options Options, system System) error {
 	services, err := planServices(ctx, m, s, options, system, false)
 	if err != nil {
 		return err
 	}
-	stages[2].plan = services
+	stage, err := findPlannedStage(stages, "services")
+	if err != nil {
+		return err
+	}
+	stage.plan = services
 	return nil
 }
 
@@ -406,9 +351,7 @@ func declaredMetadata(m *manifest.Manifest, s *state.State, profile, key string)
 func declaredServices(m *manifest.Manifest, s *state.State, profile string) []string {
 	var values []string
 	for _, path := range categoryPaths(m, profile, s) {
-		for _, service := range m.ServiceNames(path, "system") {
-			values = append(values, service)
-		}
+		values = append(values, m.ServiceNames(path, "system")...)
 		for _, service := range m.ServiceNames(path, "user") {
 			values = append(values, "user:"+service)
 		}
@@ -430,206 +373,6 @@ func selectionValues(m *manifest.Manifest, s *state.State) map[string]bool {
 	return values
 }
 
-func planGroups(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System) (StagePlan, error) {
-	declared := declaredMetadata(m, s, options.Profile, "groups")
-	current, err := system.CurrentGroups(ctx, options.User)
-	if err != nil {
-		return StagePlan{}, err
-	}
-	currentSet := stringSet(current)
-	planned := StagePlan{Declared: declared}
-	for _, group := range declared {
-		exists, err := system.GroupExists(ctx, group)
-		if err != nil {
-			return StagePlan{}, err
-		}
-		if !exists {
-			continue
-		}
-		if _, present := currentSet[group]; present {
-			if !contains(s.Items("managed", "groups"), group) {
-				planned.Adopted = append(planned.Adopted, group)
-			}
-		} else {
-			planned.Missing = append(planned.Missing, group)
-		}
-	}
-	planned.Extra = subtract(s.Items("managed", "groups"), declared)
-	return sortPlan(planned), nil
-}
-
-func planConfigs(m *manifest.Manifest, s *state.State, options Options) (StagePlan, error) {
-	declared := declaredMetadata(m, s, options.Profile, "configs")
-	planned := StagePlan{Declared: declared}
-	tracked := s.Items("managed", "configs")
-	trackedSet := stringSet(tracked)
-	for _, mapping := range declared {
-		source, target, err := configPaths(mapping, options)
-		if err != nil {
-			return StagePlan{}, err
-		}
-		if _, err := os.Stat(source); err != nil {
-			return StagePlan{}, fmt.Errorf("config source %s: %w", source, err)
-		}
-		matches, err := configMatches(target, source)
-		if err != nil {
-			return StagePlan{}, err
-		}
-		if matches {
-			if !s.Exists {
-				if _, tracked := trackedSet[mapping]; !tracked {
-					planned.Adopted = append(planned.Adopted, mapping)
-				}
-			}
-		} else {
-			planned.Missing = append(planned.Missing, mapping)
-		}
-	}
-	planned.Extra = subtract(tracked, declared)
-	return sortPlan(planned), nil
-}
-
-func planServices(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system System, allowMissingConfigLinks bool) (StagePlan, error) {
-	declared := declaredServices(m, s, options.Profile)
-	configs := declaredMetadata(m, s, options.Profile, "configs")
-	planned := StagePlan{Declared: declared}
-	trackedSet := stringSet(s.Items("managed", "services"))
-	for _, service := range declared {
-		userService, name := strings.HasPrefix(service, "user:"), strings.TrimPrefix(service, "user:")
-		exists, err := system.ServiceExists(ctx, userService, name)
-		if err != nil {
-			return StagePlan{}, err
-		}
-		if !exists && configProvidesService(configs, service, options, allowMissingConfigLinks) {
-			exists = true
-		}
-		if !exists {
-			continue
-		}
-		enabled, err := system.ServiceEnabled(ctx, userService, name)
-		if err != nil {
-			return StagePlan{}, err
-		}
-		if enabled {
-			if _, tracked := trackedSet[service]; !tracked {
-				planned.Adopted = append(planned.Adopted, service)
-			}
-		} else {
-			planned.Missing = append(planned.Missing, service)
-		}
-	}
-	planned.Extra = subtract(s.Items("managed", "services"), declared)
-	return sortPlan(planned), nil
-}
-
-func configProvidesService(configs []string, service string, options Options, allowMissingConfigLinks bool) bool {
-	userService := strings.HasPrefix(service, "user:")
-	name := strings.TrimPrefix(service, "user:")
-	suffix := "/systemd/system/" + name
-	if userService {
-		suffix = "/systemd/user/" + name
-	}
-	for _, mapping := range configs {
-		source, target, err := configPaths(mapping, options)
-		if err != nil || !strings.HasSuffix(filepath.ToSlash(target), suffix) {
-			continue
-		}
-		if _, err := os.Stat(source); err != nil {
-			continue
-		}
-		if allowMissingConfigLinks {
-			return true
-		}
-		matches, err := configMatches(target, source)
-		if err == nil && matches {
-			return true
-		}
-	}
-	return false
-}
-
-func configMatchesService(configs []string, service string, options Options) bool {
-	userService := strings.HasPrefix(service, "user:")
-	name := strings.TrimPrefix(service, "user:")
-	suffix := "/systemd/system/" + name
-	if userService {
-		suffix = "/systemd/user/" + name
-	}
-	for _, mapping := range configs {
-		source, target, err := configPaths(mapping, options)
-		if err != nil || !strings.HasSuffix(filepath.ToSlash(target), suffix) {
-			continue
-		}
-		matches, err := configMatches(target, source)
-		if err == nil && matches {
-			return true
-		}
-	}
-	return false
-}
-
-func applyGroups(ctx context.Context, plan StagePlan, options Options, system System) error {
-	for _, group := range plan.Missing {
-		if err := system.AddToGroup(ctx, options.User, group); err != nil {
-			return err
-		}
-	}
-	for _, group := range plan.Extra {
-		if err := system.RemoveFromGroup(ctx, options.User, group); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func applyConfigs(plan StagePlan, options Options) error {
-	for _, mapping := range plan.Missing {
-		source, target, err := configPaths(mapping, options)
-		if err != nil {
-			return err
-		}
-		if err := linkConfig(source, target, options.Replace); err != nil {
-			if errors.Is(err, errConfigConflict) {
-				fmt.Fprintf(options.Output, "skipping %s: exists and is not a repo link; use --replace to overwrite\n", target)
-				continue
-			}
-			return err
-		}
-	}
-	for _, mapping := range plan.Extra {
-		source, target, err := configPaths(mapping, options)
-		if err != nil {
-			return err
-		}
-		matches, err := configMatches(target, source)
-		if err != nil {
-			return err
-		}
-		if matches {
-			if err := os.Remove(target); err != nil {
-				return fmt.Errorf("remove config link %s: %w", target, err)
-			}
-		}
-	}
-	return nil
-}
-
-func applyServices(ctx context.Context, plan StagePlan, options Options, system System) error {
-	for _, service := range plan.Missing {
-		userService, name := strings.HasPrefix(service, "user:"), strings.TrimPrefix(service, "user:")
-		if err := system.EnableService(ctx, userService, name); err != nil {
-			return err
-		}
-	}
-	for _, service := range plan.Extra {
-		userService, name := strings.HasPrefix(service, "user:"), strings.TrimPrefix(service, "user:")
-		if err := system.DisableService(ctx, userService, name); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func configPaths(mapping string, options Options) (string, string, error) {
 	parts := strings.SplitN(mapping, ":", 2)
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
@@ -638,21 +381,14 @@ func configPaths(mapping string, options Options) (string, string, error) {
 	if filepath.IsAbs(parts[0]) {
 		return "", "", fmt.Errorf("config source must be relative to root: %s", parts[0])
 	}
-	home, err := os.UserHomeDir()
+	target, roots, err := resolveUserPath(parts[1], false)
 	if err != nil {
-		return "", "", fmt.Errorf("find home directory: %w", err)
+		return "", "", err
 	}
-	configHome := os.Getenv("XDG_CONFIG_HOME")
-	if configHome == "" {
-		configHome = filepath.Join(home, ".config")
-	}
-	target := strings.ReplaceAll(parts[1], "$HOME", home)
-	target = strings.ReplaceAll(target, "$XDG_CONFIG_HOME", configHome)
 	if !filepath.IsAbs(target) {
 		return "", "", fmt.Errorf("config target must be absolute: %s", parts[1])
 	}
-	target = filepath.Clean(target)
-	if !pathWithin(home, target) && !pathWithin(configHome, target) {
+	if !roots.contains(target) {
 		return "", "", fmt.Errorf("config target is outside allowed home paths: %s", target)
 	}
 	root, err := filepath.Abs(options.RootPath)
@@ -670,7 +406,7 @@ func configPaths(mapping string, options Options) (string, string, error) {
 	if err := validateSourceSymlinks(root, source); err != nil {
 		return "", "", err
 	}
-	if err := validateTargetSymlinks(target, home, configHome); err != nil {
+	if err := validateTargetSymlinks(target, roots.home, roots.configHome); err != nil {
 		return "", "", err
 	}
 	return source, target, nil
@@ -807,27 +543,20 @@ func matchingConfigs(declared []string, options Options) []string {
 
 func printPlan(output io.Writer, plan Plan, format string) {
 	if format == "json" {
-		for _, stage := range []struct {
-			name string
-			plan StagePlan
-		}{
-			{name: "groups", plan: plan.Groups},
-			{name: "configs", plan: plan.Configs},
-			{name: "services", plan: plan.Services},
-		} {
+		for _, stage := range plan.Stages() {
 			_ = json.NewEncoder(output).Encode(map[string]any{
-				"stage":    stage.name,
-				"declared": stage.plan.Declared,
-				"adopted":  stage.plan.Adopted,
-				"missing":  stage.plan.Missing,
-				"extra":    stage.plan.Extra,
+				"stage":    stage.Name,
+				"declared": stage.Plan.Declared,
+				"adopted":  stage.Plan.Adopted,
+				"missing":  stage.Plan.Missing,
+				"extra":    stage.Plan.Extra,
 			})
 		}
 		return
 	}
-	printStage(output, "GROUPS", plan.Groups)
-	printStage(output, "CONFIGS", plan.Configs)
-	printStage(output, "SERVICES", plan.Services)
+	for _, stage := range plan.Stages() {
+		printStage(output, stage.Label, stage.Plan)
+	}
 }
 
 func printStage(output io.Writer, name string, plan StagePlan) {
