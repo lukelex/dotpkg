@@ -55,7 +55,7 @@ var identifier = regexp.MustCompile(`^[a-z][a-z0-9_\-]*$`)
 func Load(m *manifest.Manifest) (Spec, error) {
 	value, ok := m.Data["onboarding"]
 	if !ok {
-		return Spec{}, fmt.Errorf("manifest has no onboarding section")
+		return packageWorkflow(), nil
 	}
 	data, err := yaml.Marshal(value)
 	if err != nil {
@@ -104,6 +104,23 @@ func Load(m *manifest.Manifest) (Spec, error) {
 		seen[step.ID] = true
 	}
 	return spec, nil
+}
+
+// Reconciliation inspects installed packages and managed state on every run;
+// no saved wizard success flag can skip a subsequent package transaction.
+func packageWorkflow() Spec {
+	action := []string{"${binary}", "sync", "--manifest", "${manifest}",
+		"--state-file", "${state}", "--profile", "${profile}", "--host", "${host}",
+		"--root", "${root}", "--selections", "${selections}", "--require-selections", "--yes"}
+	return Spec{
+		Version: 1, Title: "Reconcile this machine's packages",
+		Description: "Review the existing manifest and package choices. Reconciliation checks installed packages and managed state each time.",
+		Steps: []Step{{
+			ID: "packages", Title: "Reconcile selected packages",
+			Description:  "Install missing packages, adopt selected installed packages, and remove only previously managed packages no longer selected.",
+			PackagesOnly: true, Interactive: true, Action: action, UnattendedAction: action,
+		}},
+	}
 }
 
 func (s Spec) ForProfile(profile string, packagesOnly bool) []Step {

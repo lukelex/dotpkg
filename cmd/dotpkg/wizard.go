@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/lukelex/dotpkg/internal/reconcile"
 	"github.com/lukelex/dotpkg/internal/wizard"
 )
 
@@ -22,7 +23,7 @@ func wizardCommand(ctx context.Context, args []string) error {
 		return err
 	}
 	if common.help {
-		fmt.Fprintln(os.Stdout, "Usage: dotpkg wizard [--manifest PATH] [--root PATH] [--resume] [--dry-run] [--plain --yes --selections PATH]\n\nA manifest onboarding.version: 1 section defines the setup workflow.\n--dry-run is read-only and does not execute manifest commands.")
+		fmt.Fprintln(os.Stdout, "Usage: dotpkg wizard [--manifest PATH] [--root PATH] [--resume] [--dry-run] [--plain --yes --selections PATH]\n\nWithout a default manifest, offers a starter setup for an installed Arch Linux machine.\nCustom manifests use onboarding.version: 1 to define the workflow.\n--dry-run is read-only and does not execute manifest commands.")
 		set.PrintDefaults()
 		return nil
 	}
@@ -30,6 +31,24 @@ func wizardCommand(ctx context.Context, args []string) error {
 		return fmt.Errorf("wizard does not accept positional arguments")
 	}
 	options.Reconcile = common.options()
+	explicitManifest := os.Getenv("DOTPKG_MANIFEST") != ""
+	explicitSession := false
+	set.Visit(func(f *flag.Flag) {
+		if f.Name == "manifest" {
+			explicitManifest = true
+		}
+		switch f.Name {
+		case "resume", "profile", "desktop", "server", "host":
+			explicitSession = true
+		}
+	})
+	options.AutoResume = !explicitManifest && !explicitSession
+	if !explicitManifest {
+		if _, err := os.Lstat(common.manifest); os.IsNotExist(err) {
+			options.Bootstrap = true
+			options.Reconcile.ManifestPath = reconcile.ConfigManifestPath()
+		}
+	}
 	options.Yes = common.yes
 	return wizard.Run(ctx, options)
 }

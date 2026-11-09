@@ -236,8 +236,10 @@ version    Print the executable version
 `dotpkg --help` displays it alongside the command reference.
 
 Use `--output json` with `plan`, `diff`, `sync`, or `clean` for a unified,
-versioned plan document. For guided installation, use `dotpkg wizard` with a
-manifest-defined onboarding workflow; see [guided installation](docs/onboarding.md).
+versioned plan document. For guided installation, use `dotpkg wizard`. Without
+an existing manifest it offers a starter package setup for an installed Arch
+Linux machine; custom manifests can define their own onboarding workflow.
+See [guided installation](docs/onboarding.md).
 Explicit package choices are accepted by `sync --selections PATH --require-selections`.
 The plan schema is [plan-v1.json](schema/plan-v1.json) and
 covers package, AppImage, GitHub artifact, remote-bundle, group, config,

@@ -1,5 +1,36 @@
 # Guided installation
 
+On an already installed Arch Linux machine, start without a manifest:
+
+```sh
+dotpkg wizard
+```
+
+When no default manifest exists, the wizard offers a built-in starter: Git,
+curl, and nano for both profiles, plus optional Firefox/Thunar, Hyprland, or i3
+packages for desktops. It saves `~/.config/dotpkg/package.yaml` (respecting
+`XDG_CONFIG_HOME`) only after approval, then installs your selections. You can
+edit that manifest later. This sets up packages on a booted Arch system; disk
+partitioning, OS installation, accounts, and desktop session configuration are
+not part of the starter. Package installation requires sudo access.
+
+`dotpkg wizard --dry-run` previews the starter without writing files. Explicit
+`--manifest` and `DOTPKG_MANIFEST` paths must exist; they are never silently
+replaced with a starter.
+
+If a default manifest already exists, `dotpkg wizard` reuses it. Discovery uses
+`DOTPKG_MANIFEST`, then `$XDG_CONFIG_HOME/dotpkg/package.yaml` (normally
+`~/.config/dotpkg/package.yaml`), then `./packages.yaml`. A manifest without
+`onboarding` gets a built-in package-reconciliation workflow without modifying
+the manifest. Each run checks installed packages and managed state again.
+
+With default discovery, saved wizard sessions resume automatically at review,
+restoring the profile, host, and choices. Approval is still required. Explicit
+profile/host flags override automatic resume; `--resume=false` starts the choice
+screens again. For an explicit manifest or `DOTPKG_MANIFEST`, use `--resume` to
+restore the saved profile and host. Custom onboarding workflows retain their
+own checks and actions.
+
 `dotpkg wizard --manifest package.yaml --root /path/to/dotfiles` runs a
 full-screen Bubble Tea frontend. The manifest owns personal onboarding; dotpkg
 owns package choices, presentation, checks, progress, and recovery. No package
@@ -41,7 +72,7 @@ onboarding:
 Onboarding fields are strictly decoded. IDs must be unique lowercase identifiers;
 dependencies must reference an earlier step. Commands are argv arrays, with
 environment-style expansion inside individual arguments (no shell evaluation).
-`${root}`, `${manifest}`, `${profile}`, `${host}`, `${binary}`, `${selections}`,
+`${root}`, `${manifest}`, `${state}`, `${profile}`, `${host}`, `${binary}`, `${selections}`,
 input IDs, and environment variables are available. Use an explicit shell
 script when shell logic is needed. Manifests are executable, trusted configuration,
 just like installation scripts.

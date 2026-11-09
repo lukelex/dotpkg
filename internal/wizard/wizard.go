@@ -89,14 +89,18 @@ func prepare(options Options) (*runtime, []reconcile.SelectionChoice, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if options.Reconcile.StatePath == "" {
+	if options.Bootstrap && options.Reconcile.StatePath == "" {
 		options.Reconcile.StatePath = reconcile.ConfigStatePath()
 	}
-	m, s, normalized, err := reconcile.Load(options.Reconcile)
+	m, s, normalized, err := loadManifest(options)
 	if err != nil {
 		return nil, nil, err
 	}
 	options.Reconcile = normalized
+	options.Reconcile.StatePath, err = filepath.Abs(normalized.StatePath)
+	if err != nil {
+		return nil, nil, err
+	}
 	spec, err := Load(m)
 	if err != nil {
 		return nil, nil, err
@@ -115,6 +119,10 @@ func prepare(options Options) (*runtime, []reconcile.SelectionChoice, error) {
 	if data, err := os.ReadFile(r.sessionPath()); err == nil {
 		if err := json.Unmarshal(data, &r.session); err != nil {
 			return nil, nil, fmt.Errorf("read wizard session: %w", err)
+		}
+		if options.AutoResume {
+			options.Resume = true
+			r.options.Resume = true
 		}
 	} else if !os.IsNotExist(err) {
 		return nil, nil, err
@@ -138,7 +146,7 @@ func prepare(options Options) (*runtime, []reconcile.SelectionChoice, error) {
 	if options.Resume {
 		r.options.Reconcile.Profile = r.session.Profile
 		r.options.Reconcile.HostPath = r.session.Host
-		m, s, _, err = reconcile.Load(r.options.Reconcile)
+		m, s, _, err = loadManifest(r.options)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -192,7 +200,9 @@ func prepare(options Options) (*runtime, []reconcile.SelectionChoice, error) {
 func (r *runtime) reloadChoices() ([]reconcile.SelectionChoice, error) {
 	options := r.options.Reconcile
 	options.Profile, options.HostPath = r.session.Profile, r.session.Host
-	m, s, _, err := reconcile.Load(options)
+	loadOptions := r.options
+	loadOptions.Reconcile = options
+	m, s, _, err := loadManifest(loadOptions)
 	if err != nil {
 		return nil, err
 	}

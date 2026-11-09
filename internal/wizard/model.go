@@ -550,6 +550,9 @@ func (m *model) View() string {
 		}
 	case "review":
 		heading("Review before making changes")
+		if m.r.options.Bootstrap {
+			paragraph("Create starter manifest: " + m.r.options.Reconcile.ManifestPath + ". Installs the selected tools on an existing Arch Linux system.")
+		}
 		paragraph("Profile: " + m.r.session.Profile + "    Host: " + m.r.session.Host)
 		var selected []string
 		for _, c := range m.choices {

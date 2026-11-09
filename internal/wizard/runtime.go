@@ -17,6 +17,8 @@ import (
 )
 
 type Options struct {
+	Bootstrap      bool
+	AutoResume     bool
 	Reconcile      reconcile.Options
 	Plain          bool
 	Yes            bool
@@ -84,6 +86,7 @@ func (r *runtime) values() map[string]string {
 		"root": r.options.Reconcile.RootPath, "profile": r.session.Profile,
 		"host": r.session.Host, "manifest": r.options.Reconcile.ManifestPath,
 		"binary": r.executable, "selections": r.selectionsPath(),
+		"state": r.options.Reconcile.StatePath,
 	}
 	for key, value := range r.session.Inputs {
 		values[key] = value
@@ -185,6 +188,12 @@ func (r *runtime) event(step, status string) {
 }
 
 func (r *runtime) begin() error {
+	if r.options.Bootstrap {
+		if err := createStarter(r.options.Reconcile.ManifestPath); err != nil {
+			return err
+		}
+		r.options.Bootstrap = false
+	}
 	if err := r.save(); err != nil {
 		return err
 	}
