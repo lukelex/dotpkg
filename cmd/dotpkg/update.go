@@ -1,0 +1,117 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/lukelex/dotpkg/internal/backend"
+	"github.com/lukelex/dotpkg/internal/manifest"
+)
+
+var updateHostname = os.Hostname
+var updateExecutable = os.Executable
+var updateInput io.Reader = os.Stdin
+
+func updateCommand(ctx context.Context, args []string, system backend.Backend) error {
+	set := flag.NewFlagSet("update", flag.ContinueOnError)
+	set.SetOutput(os.Stderr)
+	var flags commonFlags
+	flags.register(set)
+	if err := set.Parse(args); err != nil {
+		return err
+	}
+	if flags.help {
+		fmt.Fprintln(os.Stdout, "Usage: dotpkg update [--manifest PATH] [--host NAME|PATH] [--dry-run] [--yes]")
+		return nil
+	}
+	if set.NArg() != 0 {
+		return fmt.Errorf("update accepts no positional arguments")
+	}
+	if flags.host == "" {
+		name, err := updateHostname()
+		if err != nil {
+			return fmt.Errorf("determine hostname for self-update: %w", err)
+		}
+		if name == "" || name == "." || name == ".." || filepath.Base(name) != name {
+			return fmt.Errorf("invalid hostname %q: supply --host explicitly", name)
+		}
+		flags.host = name
+	}
+	host := flags.host
+	if _, err := os.Stat(host); err != nil {
+		host = filepath.Join(filepath.Dir(flags.manifest), "hosts", flags.host+".yaml")
+	}
+	if _, err := os.Stat(host); err != nil {
+		return fmt.Errorf("host overlay %s not found (use --host or create hosts/%s.yaml): %w", host, flags.host, err)
+	}
+	// Validate the effective manifest, but read the opt-in only from the host file.
+	if _, err := manifest.Load(flags.manifest, host); err != nil {
+		return err
+	}
+	setting, err := manifest.HostSelfUpdate(host)
+	if err != nil {
+		return err
+	}
+	updater, ok := system.(backend.SelfUpdater)
+	if !ok {
+		return fmt.Errorf("self-update is not supported by the selected package backend")
+	}
+	if err := flags.configureBackend(system); err != nil {
+		return err
+	}
+	ctx, cancel := flags.commandContext(ctx)
+	defer cancel()
+	executable, err := updateExecutable()
+	if err != nil {
+		return fmt.Errorf("locate running executable: %w", err)
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return fmt.Errorf("resolve running executable: %w", err)
+	}
+	if err := updater.VerifyExecutable(ctx, executable, setting.Package); err != nil {
+		return err
+	}
+	if !flags.dryRun && !flags.check {
+		fmt.Fprintln(os.Stderr, "warning: updating only dotpkg on Arch can cause a partial upgrade; consider upgrading the full system first")
+	}
+	current, available, newer, err := updater.AvailableUpdate(ctx, setting.Package, setting.Origin, flags.dryRun || flags.check)
+	if err != nil {
+		return err
+	}
+	if flags.dryRun || flags.check {
+		status := "up to date"
+		if newer {
+			status = "update available"
+		}
+		fmt.Printf("dry-run: %s installed %s, available %s (%s; repository metadata may be stale; no refresh or installation)\n", setting.Package, current, available, status)
+		return nil
+	}
+	if !newer {
+		fmt.Printf("%s is up to date (%s)\n", setting.Package, current)
+		return nil
+	}
+	if !flags.yes {
+		fmt.Printf("Upgrade %s from %s to %s? [y/N]: ", setting.Package, current, available)
+		answer, err := bufio.NewReader(updateInput).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(answer)), "y") {
+			fmt.Println("Update cancelled")
+			return nil
+		}
+	}
+	if err := updater.UpgradePackage(ctx, setting.Package, setting.Origin); err != nil {
+		return err
+	}
+	fmt.Printf("Updated %s from %s to %s\n", setting.Package, current, available)
+	return nil
+}

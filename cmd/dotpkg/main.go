@@ -66,6 +66,8 @@ func run(ctx context.Context, args []string) error {
 		return sync(ctx, args[1:], system, true)
 	case "sync":
 		return sync(ctx, args[1:], system, false)
+	case "update":
+		return updateCommand(ctx, args[1:], system)
 	case "clean":
 		return cleanCommand(ctx, args[1:], system)
 	case "recover":
@@ -88,6 +90,7 @@ Commands:
   plan      Show package changes without modifying the system.
   diff      Alias for plan, showing package and resource drift.
   sync      Reconcile declared packages and managed package state.
+  update    Upgrade this package-managed executable when enabled by the host.
   clean     Remove only managed items no longer declared.
   recover   Roll back a pending package transaction.
   add       Declare, validate, install, and track a package.
@@ -337,7 +340,7 @@ func completion(args []string) error {
 const bashCompletion = `# bash completion for dotpkg
 _dotpkg_complete() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
-  local commands="init validate plan diff sync clean recover add doctor completion version"
+	local commands="init validate plan diff sync update clean recover add doctor completion version"
   local options="--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help"
   if [[ ${COMP_CWORD} -eq 1 ]]; then
     COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
@@ -350,12 +353,12 @@ complete -F _dotpkg_complete dotpkg
 
 const zshCompletion = `#compdef dotpkg
 _dotpkg() {
-  _arguments '1:command:(init validate plan diff sync clean recover add doctor completion version)' '*:option:(--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help)'
+  _arguments '1:command:(init validate plan diff sync update clean recover add doctor completion version)' '*:option:(--manifest --host --state-file --profile --dry-run --check --yes --resources --root --replace --restart-services --output --timeout --backend-timeout --aur-retries --aur-retry-delay --verbose --desktop --server --help)'
 }
 _dotpkg "$@"
 `
 
-const fishCompletion = `complete -c dotpkg -f -n '__fish_use_subcommand' -a 'init validate plan diff sync clean recover add doctor completion version'
+const fishCompletion = `complete -c dotpkg -f -n '__fish_use_subcommand' -a 'init validate plan diff sync update clean recover add doctor completion version'
 complete -c dotpkg -l manifest -r
 complete -c dotpkg -l host -r
 complete -c dotpkg -l state-file -r

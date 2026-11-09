@@ -110,6 +110,29 @@ Debian/Ubuntu requires `apt`/`dpkg`, and Fedora/RHEL requires `dnf`/`rpm`.
 Resource reconciliation additionally uses `id`, `getent`, and `systemctl`.
 See [RELEASE.md](RELEASE.md) for release verification details.
 
+### Optional package-managed self-update (Arch)
+
+Self-update is separate from `sync` and requires a package-managed dotpkg
+executable. Add this **only to the host overlay** (for example,
+`hosts/myhostname.yaml` beside the selected manifest):
+
+```yaml
+self_update:
+  package: dotpkg-bin
+  origin: aur # or repo
+```
+
+Run `dotpkg update` to use the exact system hostname's overlay, or select one
+with `dotpkg update --host NAME` (or `--host PATH`). Use `--manifest PATH` when
+needed. The command verifies that the running binary belongs to the configured
+package. It refreshes repository metadata for `repo` packages, checks for a
+newer version, warns about Arch partial upgrades, and asks before upgrading
+only that package. `--yes` skips confirmation; `--dry-run`/`--check` skips
+metadata refresh and installation (cached repository metadata may be stale).
+An AUR version lookup may still contact the AUR. `vercmp` must be installed;
+`yay` is also required for AUR packages. Standalone release binaries cannot
+use this command and remain on the pinned, checksum-verified installation path.
+
 ## Manifest and selections
 
 The manifest keeps the dotfiles-compatible YAML shape. Packages may be grouped
@@ -155,6 +178,7 @@ validate   Validate manifest packages and backend availability
 plan       Show package changes without applying them
 diff       Read-only alias for plan
 sync       Apply package changes and, optionally, resources
+update     Upgrade this package-managed executable when enabled by the host
 clean      Remove stale managed packages and resources
 recover    Roll back a pending package transaction
 add        Declare, validate, install, and track one package
