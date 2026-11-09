@@ -113,7 +113,7 @@ See [RELEASE.md](RELEASE.md) for release verification details.
 ### Optional package-managed self-update (Arch)
 
 Self-update is separate from `sync` and requires a package-managed dotpkg
-executable. Add this **only to the host overlay** (for example,
+executable. Add this to the base manifest, or to a host overlay (for example,
 `hosts/myhostname.yaml` beside the selected manifest):
 
 ```yaml
@@ -122,9 +122,12 @@ self_update:
   origin: aur # or repo
 ```
 
-Run `dotpkg update` to use the exact system hostname's overlay, or select one
-with `dotpkg update --host NAME` (or `--host PATH`). Use `--manifest PATH` when
-needed. The command verifies that the running binary belongs to the configured
+Run `dotpkg update` to use the exact system hostname's overlay if it exists;
+otherwise it uses the base manifest. An existing overlay's `self_update` takes
+precedence when present; an overlay without it uses the base setting. Select
+an existing overlay with `--host NAME` (or `--host PATH`); a missing explicit
+overlay is an error. Use `--manifest PATH` when needed. The command verifies
+that the running binary belongs to the configured
 package. It refreshes repository metadata for `repo` packages, checks for a
 newer version, warns about Arch partial upgrades, and asks before upgrading
 only that package. `--yes` skips confirmation; `--dry-run`/`--check` skips
@@ -203,7 +206,7 @@ validate   Validate manifest packages and backend availability
 plan       Show package changes without applying them
 diff       Read-only alias for plan
 sync       Apply package changes and, optionally, resources
-update     Upgrade this package-managed executable when enabled by the host
+update     Upgrade this package-managed executable when explicitly enabled
 clean      Remove stale managed packages and resources
 recover    Roll back a pending package transaction
 add        Declare, validate, install, and track one package

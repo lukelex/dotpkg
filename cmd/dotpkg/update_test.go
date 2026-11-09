@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,11 +13,12 @@ type updateFakeBackend struct {
 	addFakeBackend
 	verified, upgraded string
 	dry, newer         bool
+	verifyErr          error
 }
 
 func (f *updateFakeBackend) VerifyExecutable(_ context.Context, path, pkg string) error {
 	f.verified = path + ":" + pkg
-	return nil
+	return f.verifyErr
 }
 func (f *updateFakeBackend) AvailableUpdate(_ context.Context, pkg, origin string, dry bool) (string, string, bool, error) {
 	f.dry = dry
@@ -49,8 +51,11 @@ func TestUpdateHostOptInAndDryRun(t *testing.T) {
 	updateExecutable = func() (string, error) { return base, nil }
 	fake := &updateFakeBackend{newer: true}
 	args := []string{"--manifest", base, "--dry-run"}
-	if err := updateCommand(context.Background(), args, fake); err == nil || !strings.Contains(err.Error(), "disabled") {
-		t.Fatalf("base opt-in should be ignored: %v", err)
+	if err := updateCommand(context.Background(), args, fake); err != nil {
+		t.Fatalf("base opt-in should work when overlay omits it: %v", err)
+	}
+	if fake.verified != base+":untrusted" || !fake.dry || fake.upgraded != "" {
+		t.Fatalf("unexpected base update activity: %+v", fake)
 	}
 	if err := os.WriteFile(host, []byte("self_update:\n  package: dotpkg-bin\n  origin: aur\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -76,16 +81,34 @@ func TestUpdateHostOptInAndDryRun(t *testing.T) {
 	}
 }
 
-func TestUpdateRequiresHostOverlay(t *testing.T) {
+func TestUpdateWithoutHostOverlay(t *testing.T) {
 	dir := t.TempDir()
 	base := filepath.Join(dir, "packages.yaml")
+	if err := os.WriteFile(base, []byte("source: repo\nself_update: {package: dotpkg-bin, origin: aur}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	previous, previousExecutable := updateHostname, updateExecutable
+	t.Cleanup(func() { updateHostname, updateExecutable = previous, previousExecutable })
+	updateHostname = func() (string, error) { return "missing", nil }
+	updateExecutable = func() (string, error) { return base, nil }
+	fake := &updateFakeBackend{newer: true}
+	if err := updateCommand(context.Background(), []string{"--manifest", base, "--dry-run"}, fake); err != nil {
+		t.Fatal(err)
+	}
+	if fake.verified != base+":dotpkg-bin" || !fake.dry || fake.upgraded != "" {
+		t.Fatalf("unexpected update activity: %+v", fake)
+	}
+	if err := updateCommand(context.Background(), []string{"--manifest", base, "--host", "typo", "--dry-run"}, fake); err == nil || !strings.Contains(err.Error(), "host overlay") {
+		t.Fatalf("explicit missing host accepted: %v", err)
+	}
+	fake.verifyErr = errors.New("executable is not package-managed")
+	if err := updateCommand(context.Background(), []string{"--manifest", base, "--yes"}, fake); !errors.Is(err, fake.verifyErr) || fake.upgraded != "" {
+		t.Fatalf("ownership check not enforced: %v, %+v", err, fake)
+	}
 	if err := os.WriteFile(base, []byte("source: repo\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	previous := updateHostname
-	t.Cleanup(func() { updateHostname = previous })
-	updateHostname = func() (string, error) { return "missing", nil }
-	if err := updateCommand(context.Background(), []string{"--manifest", base}, &updateFakeBackend{}); err == nil || !strings.Contains(err.Error(), "host overlay") {
-		t.Fatalf("missing host accepted: %v", err)
+	if err := updateCommand(context.Background(), []string{"--manifest", base, "--dry-run"}, fake); err == nil || !strings.Contains(err.Error(), "disabled") {
+		t.Fatalf("missing opt-in accepted: %v", err)
 	}
 }

@@ -34,6 +34,7 @@ func updateCommand(ctx context.Context, args []string, system backend.Backend) e
 	if set.NArg() != 0 {
 		return fmt.Errorf("update accepts no positional arguments")
 	}
+	explicitHost := flags.host != ""
 	if flags.host == "" {
 		name, err := updateHostname()
 		if err != nil {
@@ -45,17 +46,21 @@ func updateCommand(ctx context.Context, args []string, system backend.Backend) e
 		flags.host = name
 	}
 	host := flags.host
-	if _, err := os.Stat(host); err != nil {
+	if _, err := os.Stat(host); errors.Is(err, os.ErrNotExist) {
 		host = filepath.Join(filepath.Dir(flags.manifest), "hosts", flags.host+".yaml")
+	} else if err != nil {
+		return err
 	}
-	if _, err := os.Stat(host); err != nil {
-		return fmt.Errorf("host overlay %s not found (use --host or create hosts/%s.yaml): %w", host, flags.host, err)
+	if _, err := os.Stat(host); errors.Is(err, os.ErrNotExist) && !explicitHost {
+		host = ""
+	} else if err != nil {
+		return fmt.Errorf("host overlay %s unavailable: %w", host, err)
 	}
-	// Validate the effective manifest, but read the opt-in only from the host file.
+	// Validate the effective manifest before reading the explicit opt-in.
 	if _, err := manifest.Load(flags.manifest, host); err != nil {
 		return err
 	}
-	setting, err := manifest.HostSelfUpdate(host)
+	setting, err := manifest.SelfUpdateSetting(flags.manifest, host)
 	if err != nil {
 		return err
 	}

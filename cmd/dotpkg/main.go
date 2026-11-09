@@ -90,7 +90,7 @@ Commands:
   plan      Show package changes without modifying the system.
   diff      Alias for plan, showing package and resource drift.
   sync      Reconcile declared packages and managed package state.
-  update    Upgrade this package-managed executable when enabled by the host.
+  update    Upgrade this package-managed executable when explicitly enabled.
   clean     Remove only managed items no longer declared.
   recover   Roll back a pending package transaction.
   add       Declare, validate, install, and track a package.

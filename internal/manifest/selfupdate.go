@@ -5,7 +5,7 @@ import (
 	"regexp"
 )
 
-// SelfUpdate is deliberately read from the host overlay, not the merged manifest.
+// SelfUpdate configures a package-managed executable upgrade.
 type SelfUpdate struct {
 	Package string
 	Origin  string
@@ -13,14 +13,26 @@ type SelfUpdate struct {
 
 var selfUpdatePackageName = regexp.MustCompile(`^[A-Za-z0-9@._+:-]+$`)
 
-func HostSelfUpdate(path string) (SelfUpdate, error) {
+// SelfUpdateSetting uses the host setting when present, otherwise the base
+// setting. A present but invalid host setting never falls back to the base.
+func SelfUpdateSetting(basePath, hostPath string) (SelfUpdate, error) {
+	path := basePath
+	if hostPath != "" {
+		host, err := readMap(hostPath)
+		if err != nil {
+			return SelfUpdate{}, err
+		}
+		if _, ok := host["self_update"]; ok {
+			path = hostPath
+		}
+	}
 	contents, err := readMap(path)
 	if err != nil {
 		return SelfUpdate{}, err
 	}
 	value, exists := contents["self_update"]
 	if !exists {
-		return SelfUpdate{}, fmt.Errorf("self-update is disabled: add self_update: {package: NAME, origin: repo|aur} to host overlay %s", path)
+		return SelfUpdate{}, fmt.Errorf("self-update is disabled: add self_update: {package: NAME, origin: repo|aur} to manifest %s", path)
 	}
 	fields, ok := value.(map[string]any)
 	if !ok {
