@@ -110,10 +110,10 @@ Debian/Ubuntu requires `apt`/`dpkg`, and Fedora/RHEL requires `dnf`/`rpm`.
 Resource reconciliation additionally uses `id`, `getent`, and `systemctl`.
 See [RELEASE.md](RELEASE.md) for release verification details.
 
-### Optional package-managed self-update (Arch)
+### Optional self-update
 
-Self-update is separate from `sync` and requires a package-managed dotpkg
-executable. Add this to the base manifest, or to a host overlay (for example,
+Self-update is separate from `sync` and requires explicit configuration.
+Add this to the base manifest, or to a host overlay (for example,
 `hosts/myhostname.yaml` beside the selected manifest):
 
 ```yaml
@@ -122,7 +122,8 @@ self_update:
   origin: aur # or repo
 ```
 
-Run `dotpkg update` to use the exact system hostname's overlay if it exists;
+For package-managed Arch executables, use `origin: repo` or `origin: aur` as
+shown above. Run `dotpkg update` to use the exact system hostname's overlay if it exists;
 otherwise it uses the base manifest. An existing overlay's `self_update` takes
 precedence when present; an overlay without it uses the base setting. Select
 an existing overlay with `--host NAME` (or `--host PATH`); a missing explicit
@@ -133,8 +134,24 @@ newer version, warns about Arch partial upgrades, and asks before upgrading
 only that package. `--yes` skips confirmation; `--dry-run`/`--check` skips
 metadata refresh and installation (cached repository metadata may be stale).
 An AUR version lookup may still contact the AUR. `vercmp` must be installed;
-`yay` is also required for AUR packages. Standalone release binaries cannot
-use this command and remain on the pinned, checksum-verified installation path.
+`yay` is also required for AUR packages.
+
+For standalone Linux amd64/arm64 binaries, configure this instead:
+
+```yaml
+self_update:
+  origin: github
+```
+
+`dotpkg update` checks the latest stable release of `lukelex/dotpkg`, confirms
+by default, downloads the matching binary and `SHA256SUMS`, verifies the
+checksum, and atomically replaces the running executable. `--dry-run` only
+checks release metadata; it does not download or replace the binary. The
+executable's directory must be writable by the user running the command.
+Package-managed executables cannot use `origin: github`. This opt-in updater
+does not change the dotfiles integration's pinned-release requirement.
+Older binaries (including v0.16.0) must be upgraded manually once to a release
+that includes GitHub self-update before they can use this mode.
 
 ## Manifest and selections
 

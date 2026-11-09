@@ -12,6 +12,8 @@ func TestHostSelfUpdate(t *testing.T) {
 		ok   bool
 	}{
 		{"self_update: {package: dotpkg-bin, origin: aur}\n", true},
+		{"self_update: {origin: github}\n", true},
+		{"self_update: {origin: github, package: dotpkg-bin}\n", false},
 		{"common: {}\n", false},
 		{"self_update: null\n", false},
 		{"self_update: {package: 'dotpkg;unsafe', origin: repo}\n", false},

@@ -112,3 +112,54 @@ func TestUpdateWithoutHostOverlay(t *testing.T) {
 		t.Fatalf("missing opt-in accepted: %v", err)
 	}
 }
+
+type fakeReleaseUpdater struct {
+	checked, installed string
+	newer              bool
+}
+
+func (f *fakeReleaseUpdater) Check(_ context.Context, executable, current string) (string, bool, error) {
+	f.checked = executable + ":" + current
+	return "v0.17.0", f.newer, nil
+}
+
+func (f *fakeReleaseUpdater) Install(_ context.Context, executable, tag string) error {
+	f.installed = executable + ":" + tag
+	return nil
+}
+
+func TestUpdateStandaloneGitHub(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "packages.yaml")
+	if err := os.WriteFile(base, []byte("source: repo\nself_update: {origin: github}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldHostname, oldExecutable, oldInput, oldUpdater := updateHostname, updateExecutable, updateInput, githubUpdater
+	t.Cleanup(func() {
+		updateHostname, updateExecutable, updateInput, githubUpdater = oldHostname, oldExecutable, oldInput, oldUpdater
+	})
+	updateHostname = func() (string, error) { return "testhost", nil }
+	updateExecutable = func() (string, error) { return base, nil }
+	updateInput = strings.NewReader("\n")
+	fake := &fakeReleaseUpdater{newer: true}
+	githubUpdater = fake
+	args := []string{"--manifest", base}
+	if err := updateCommand(context.Background(), append(args, "--dry-run"), &updateFakeBackend{}); err != nil {
+		t.Fatal(err)
+	}
+	if fake.checked != base+":"+version || fake.installed != "" {
+		t.Fatalf("dry run = %+v", fake)
+	}
+	if err := updateCommand(context.Background(), args, &updateFakeBackend{}); err != nil {
+		t.Fatal(err)
+	}
+	if fake.installed != "" {
+		t.Fatal("default-No installed release")
+	}
+	if err := updateCommand(context.Background(), append(args, "--yes"), &updateFakeBackend{}); err != nil {
+		t.Fatal(err)
+	}
+	if fake.installed != base+":v0.17.0" {
+		t.Fatalf("install = %q", fake.installed)
+	}
+}

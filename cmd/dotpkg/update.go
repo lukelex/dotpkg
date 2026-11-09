@@ -13,11 +13,13 @@ import (
 
 	"github.com/lukelex/dotpkg/internal/backend"
 	"github.com/lukelex/dotpkg/internal/manifest"
+	"github.com/lukelex/dotpkg/internal/selfupdate"
 )
 
 var updateHostname = os.Hostname
 var updateExecutable = os.Executable
 var updateInput io.Reader = os.Stdin
+var githubUpdater selfupdate.ReleaseUpdater = selfupdate.New()
 
 func updateCommand(ctx context.Context, args []string, system backend.Backend) error {
 	set := flag.NewFlagSet("update", flag.ContinueOnError)
@@ -64,13 +66,6 @@ func updateCommand(ctx context.Context, args []string, system backend.Backend) e
 	if err != nil {
 		return err
 	}
-	updater, ok := system.(backend.SelfUpdater)
-	if !ok {
-		return fmt.Errorf("self-update is not supported by the selected package backend")
-	}
-	if err := flags.configureBackend(system); err != nil {
-		return err
-	}
 	ctx, cancel := flags.commandContext(ctx)
 	defer cancel()
 	executable, err := updateExecutable()
@@ -80,6 +75,16 @@ func updateCommand(ctx context.Context, args []string, system backend.Backend) e
 	executable, err = filepath.EvalSymlinks(executable)
 	if err != nil {
 		return fmt.Errorf("resolve running executable: %w", err)
+	}
+	if setting.Origin == "github" {
+		return updateGitHub(ctx, executable, flags)
+	}
+	updater, ok := system.(backend.SelfUpdater)
+	if !ok {
+		return fmt.Errorf("self-update is not supported by the selected package backend")
+	}
+	if err := flags.configureBackend(system); err != nil {
+		return err
 	}
 	if err := updater.VerifyExecutable(ctx, executable, setting.Package); err != nil {
 		return err
@@ -118,5 +123,36 @@ func updateCommand(ctx context.Context, args []string, system backend.Backend) e
 		return err
 	}
 	fmt.Printf("Updated %s from %s to %s\n", setting.Package, current, available)
+	return nil
+}
+
+func updateGitHub(ctx context.Context, executable string, flags commonFlags) error {
+	latest, newer, err := githubUpdater.Check(ctx, executable, version)
+	if err != nil {
+		return err
+	}
+	if flags.dryRun || flags.check {
+		fmt.Printf("dry-run: dotpkg installed %s, available %s (update available: %t; no download or installation)\n", version, latest, newer)
+		return nil
+	}
+	if !newer {
+		fmt.Printf("dotpkg is up to date (%s)\n", version)
+		return nil
+	}
+	if !flags.yes {
+		fmt.Printf("Upgrade dotpkg from %s to %s using the GitHub release? [y/N]: ", version, latest)
+		answer, err := bufio.NewReader(updateInput).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(answer)), "y") {
+			fmt.Println("Update cancelled")
+			return nil
+		}
+	}
+	if err := githubUpdater.Install(ctx, executable, latest); err != nil {
+		return err
+	}
+	fmt.Printf("Updated dotpkg from %s to %s\n", version, latest)
 	return nil
 }

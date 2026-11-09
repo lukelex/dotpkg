@@ -5,7 +5,7 @@ import (
 	"regexp"
 )
 
-// SelfUpdate configures a package-managed executable upgrade.
+// SelfUpdate configures either a package-managed or GitHub release upgrade.
 type SelfUpdate struct {
 	Package string
 	Origin  string
@@ -32,7 +32,7 @@ func SelfUpdateSetting(basePath, hostPath string) (SelfUpdate, error) {
 	}
 	value, exists := contents["self_update"]
 	if !exists {
-		return SelfUpdate{}, fmt.Errorf("self-update is disabled: add self_update: {package: NAME, origin: repo|aur} to manifest %s", path)
+		return SelfUpdate{}, fmt.Errorf("self-update is disabled: add self_update: {origin: github} or {package: NAME, origin: repo|aur} to manifest %s", path)
 	}
 	fields, ok := value.(map[string]any)
 	if !ok {
@@ -45,6 +45,12 @@ func SelfUpdateSetting(basePath, hostPath string) (SelfUpdate, error) {
 	}
 	name, _ := fields["package"].(string)
 	origin, _ := fields["origin"].(string)
+	if origin == "github" {
+		if _, exists := fields["package"]; exists {
+			return SelfUpdate{}, fmt.Errorf("%s: github self_update must not specify a package", path)
+		}
+		return SelfUpdate{Origin: origin}, nil
+	}
 	if !selfUpdatePackageName.MatchString(name) || origin != "repo" && origin != "aur" {
 		return SelfUpdate{}, fmt.Errorf("%s: self_update requires a valid package name and origin repo or aur", path)
 	}
