@@ -362,9 +362,6 @@ func (s *System) stage(ctx context.Context, spec manifest.RemoteBundle, parent s
 			return "", err
 		}
 		name := header.Name
-		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
-			return "", fmt.Errorf("archive contains link: %s", name)
-		}
 		if strings.HasPrefix(name, "/") || strings.Contains(name, "\\") || path.Clean(name) != strings.TrimSuffix(name, "/") || strings.Contains("/"+name+"/", "/../") {
 			return "", fmt.Errorf("unsafe archive path: %s", name)
 		}
@@ -382,6 +379,9 @@ func (s *System) stage(ctx context.Context, spec manifest.RemoteBundle, parent s
 		}
 		if selected < 0 {
 			continue
+		}
+		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
+			return "", fmt.Errorf("archive contains link: %s", name)
 		}
 		found[selected] = true
 		if header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != 0 { // 0 is the legacy regular-file type.

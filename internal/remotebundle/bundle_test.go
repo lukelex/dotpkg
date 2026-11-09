@@ -29,6 +29,9 @@ func archive(sha string, invalid string) []byte {
 	var b bytes.Buffer
 	g := gzip.NewWriter(&b)
 	w := tar.NewWriter(g)
+	// Repository-wide links outside the requested paths must not block installs.
+	_ = w.WriteHeader(&tar.Header{Name: "skills-" + sha + "/AGENTS.md", Typeflag: tar.TypeSymlink, Linkname: "CLAUDE.md"})
+	_ = w.WriteHeader(&tar.Header{Name: "skills-" + sha + "/other.md", Typeflag: tar.TypeLink, Linkname: "skills-" + sha + "/LICENSE"})
 	license := []byte("MIT license for test fixture")
 	_ = w.WriteHeader(&tar.Header{Name: "skills-" + sha + "/LICENSE", Mode: 0644, Size: int64(len(license))})
 	_, _ = w.Write(license)
@@ -41,8 +44,12 @@ func archive(sha string, invalid string) []byte {
 		if invalid == "path" {
 			name = "../" + name
 		}
-		if invalid == "symlink" {
-			_ = w.WriteHeader(&tar.Header{Name: name, Typeflag: tar.TypeSymlink, Linkname: "/etc/passwd"})
+		if invalid == "symlink" || invalid == "hardlink" {
+			kind := byte(tar.TypeSymlink)
+			if invalid == "hardlink" {
+				kind = tar.TypeLink
+			}
+			_ = w.WriteHeader(&tar.Header{Name: name, Typeflag: kind, Linkname: "/etc/passwd"})
 			continue
 		}
 		_ = w.WriteHeader(&tar.Header{Name: name, Mode: 0644, Size: int64(len(body))})
@@ -121,7 +128,7 @@ func TestRevisionsRollbackAndOwnership(t *testing.T) {
 	if _, valid, _ := installed(targetPath, repository, first, spec("").Paths); !valid {
 		t.Fatal("download failure removed old pair")
 	}
-	for _, kind := range []string{"path", "symlink"} {
+	for _, kind := range []string{"path", "symlink", "hardlink"} {
 		broken = kind
 		if err := install(p, nil); err == nil {
 			t.Fatalf("accepted %s", kind)
