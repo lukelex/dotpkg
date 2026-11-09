@@ -136,10 +136,11 @@ func TestCompatibilityFixtureSharedStatePreservesResourceOwnership(t *testing.T)
 		installed[packageName] = true
 	}
 	if err := Sync(context.Background(), Options{
-		ManifestPath: filepath.Join("..", "..", "testdata", "dotfiles-packages.yaml"),
-		StatePath:    statePath,
-		Profile:      "desktop",
-		Yes:          true,
+		ManifestPath:   filepath.Join("..", "..", "testdata", "dotfiles-packages.yaml"),
+		StatePath:      statePath,
+		Profile:        "desktop",
+		Yes:            true,
+		ResourceSystem: &serviceOnlySystem{},
 	}, &fakeBackend{installed: installed}); err != nil {
 		t.Fatal(err)
 	}

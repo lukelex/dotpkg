@@ -55,6 +55,9 @@ func PrepareServices(ctx context.Context, m *manifest.Manifest, s *state.State, 
 	t := &ServiceTracker{records: records, inputs: map[string]map[string]serviceInput{}, packages: map[string][]string{}}
 	deps := m.ServiceDependencies(categoryPaths(m, options.Profile, s), options.Profile, selectionValues(m, s))
 	for _, service := range declaredServices(m, s, options.Profile) {
+		if options.ManagedServicesOnly && !contains(s.Items(state.ManagedKey, state.ManagedServices), service) {
+			continue
+		}
 		t.inputs[service] = map[string]serviceInput{}
 		add := func(path, action string, unit bool) {
 			path = filepath.Clean(path)

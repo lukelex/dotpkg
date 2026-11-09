@@ -118,12 +118,14 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		bundlePlan = &planned
 	}
 	var resourcePlan *resource.Plan
-	if options.Resources {
+	if options.Resources || len(s.Items(state.ManagedKey, state.ManagedServices)) > 0 {
 		resourceSystem, e := resourceBackend(options, system)
 		if e != nil {
 			return e
 		}
-		options.serviceTracker, e = resource.PrepareServices(ctx, m, s, resource.Options{Profile: options.Profile, RootPath: options.RootPath}, resourceSystem)
+		options.serviceTracker, e = resource.PrepareServices(ctx, m, s, resource.Options{
+			Profile: options.Profile, RootPath: options.RootPath, ManagedServicesOnly: !options.Resources,
+		}, resourceSystem)
 		if e != nil {
 			return e
 		}
@@ -142,9 +144,14 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 			return resourceErr
 		}
 		resourcePlan = &planned
-		resourcePlan.ServiceActions, resourceErr = options.serviceTracker.Actions(s)
-		if resourceErr != nil {
-			return resourceErr
+	}
+	if options.serviceTracker != nil && options.OutputFormat == "json" {
+		if resourcePlan == nil {
+			resourcePlan = &resource.Plan{}
+		}
+		resourcePlan.ServiceActions, err = options.serviceTracker.Actions(s)
+		if err != nil {
+			return err
 		}
 	}
 	printPlanWithGitHub(options.Output, plan, options.OutputFormat, resourcePlan, options, appImagePlan, githubPlan, bundlePlan)
@@ -152,9 +159,7 @@ func syncLocked(ctx context.Context, options Options, system backend.Backend) er
 		if options.OutputFormat == "text" {
 			fmt.Fprintln(options.Output, "packages, AppImages, and GitHub artifacts: already synchronized")
 		}
-		if !options.Resources {
-			return nil
-		}
+		return syncResources(ctx, m, s, options, system, bundlePlan)
 	}
 	if options.DryRun {
 		return syncResources(ctx, m, s, options, system, bundlePlan)
@@ -514,14 +519,14 @@ func staleGitHubFiles(previous, current githubsource.Record) githubsource.Record
 }
 
 func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, options Options, system backend.Backend, bundlePlans ...*remotebundle.Plan) error {
-	if !options.Resources {
+	if !options.Resources && options.serviceTracker == nil {
 		return nil
 	}
 	resourceSystem, err := resourceBackend(options, system)
 	if err != nil {
 		return err
 	}
-	if !options.DryRun {
+	if options.Resources && !options.DryRun {
 		setCurrentState(s, m, options)
 		if err := s.Write(); err != nil {
 			return err
@@ -551,8 +556,11 @@ func syncResources(ctx context.Context, m *manifest.Manifest, s *state.State, op
 	}
 	if !options.DryRun {
 		if err := options.serviceTracker.Checkpoint(s); err != nil {
-			return err
+			return &resource.ServiceActionError{Err: err}
 		}
+	}
+	if !options.Resources {
+		return options.serviceTracker.Finish(ctx, s, resourceOptions, resourceSystem)
 	}
 	if err := resource.Sync(ctx, m, s, resourceOptions, resourceSystem); err != nil {
 		return err

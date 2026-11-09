@@ -47,6 +47,7 @@ type Options struct {
 	ServiceTracker      *ServiceTracker
 	DeferServiceActions bool
 	NonInteractive      bool
+	ManagedServicesOnly bool
 }
 
 // StagePlan describes changes in one resource stage.

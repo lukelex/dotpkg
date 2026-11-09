@@ -45,6 +45,15 @@ func (f *failingServiceSystem) RestartService(context.Context, bool, string) err
 }
 
 func TestServiceFailureDoesNotRollbackSuccessfulPackages(t *testing.T) {
+	testServiceFailureDoesNotRollbackSuccessfulPackages(t, true)
+}
+
+func TestServiceFailureWithoutResourcesDoesNotRollbackPackages(t *testing.T) {
+	testServiceFailureDoesNotRollbackSuccessfulPackages(t, false)
+}
+
+func testServiceFailureDoesNotRollbackSuccessfulPackages(t *testing.T, resources bool) {
+	t.Helper()
 	root := t.TempDir()
 	manifestPath := filepath.Join(root, "packages.yaml")
 	statePath := filepath.Join(root, "state.yaml")
@@ -70,7 +79,7 @@ profiles:
 	}
 	services := &failingServiceSystem{fail: true}
 	packages := &fakeBackend{installed: map[string]bool{}}
-	o := Options{ManifestPath: manifestPath, StatePath: statePath, RootPath: root, Profile: "server", Resources: true, Yes: true, ResourceSystem: services, Input: strings.NewReader(""), Output: io.Discard}
+	o := Options{ManifestPath: manifestPath, StatePath: statePath, RootPath: root, Profile: "server", Resources: resources, Yes: true, ResourceSystem: services, Input: strings.NewReader(""), Output: io.Discard}
 	err := Sync(context.Background(), o, packages)
 	var actionErr *resource.ServiceActionError
 	if !errors.As(err, &actionErr) {

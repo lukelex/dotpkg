@@ -339,11 +339,17 @@ System services use `sudo`; user services are tracked separately.
 
 ### Automatic service actions
 
-With `--resources`, dotpkg detects changes to tracked services' unit files,
+Every `sync` detects changes to already-managed services' unit files,
 unit-specific drop-in directories, and explicitly declared file/directory inputs.
 It also detects packages changed by dotpkg when they declare the service in their
 metadata or appear as an explicit dependency. Package versions changed by other
 tools and transitive systemd/library dependencies are not inspected.
+
+`--resources` is only needed to reconcile resource declarations: config links,
+groups, directories, and service adoption/enablement. Service-change detection
+and pending reload/restart offers also run during package-only syncs, including
+runs with no package changes. Unmanaged services are not inspected or adopted
+by those runs.
 
 ```yaml
 resources:
